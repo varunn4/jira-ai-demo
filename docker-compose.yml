@@ -1,0 +1,74 @@
+services:
+  jira-ai-api:
+    image: jira-ai-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: jira-ai-api
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      REPOSITORY_SEARCH_ROOT: /host-repos
+      REPOSITORY_HOST_ROOT: ${REPOSITORY_HOST_ROOT:-/host-repos}
+      EXCLUDED_REPOSITORY_NAMES: ${EXCLUDED_REPOSITORY_NAMES:-JIRA-AI}
+
+      # IMPORTANT — these point at host services
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/jira_ai}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_EMBED_TIMEOUT_SECONDS: 60
+      OLLAMA_EMBED_BATCH_SIZE: 8
+      OLLAMA_NUM_PARALLEL: 4
+      OLLAMA_EMBED_CONCURRENCY: 1
+      CODEBASE_EMBED_MAX_CHARS: 2000
+      CODEBASE_EMBED_MAX_FILES_PER_REPO: 1000
+      RCA_INDEX_EXCLUDED_REPOS: ${RCA_INDEX_EXCLUDED_REPOS:-}
+      QDRANT_URL: ${QDRANT_URL:-http://host.docker.internal:6333}
+      REPO_TREE_SRC_PATH: /app
+      REPO_TREE_CONFIG_PATH: /app/repo_tree/config/repos.yaml
+      REPO_TREE_WORKSPACE_DIR: /app/repo_tree/workspace
+      REPO_TREE_TIMEOUT_SECONDS: 300
+
+      GRAPH_JOB_REPO_TIMEOUT_SECONDS: 3600
+      GRAPH_JOB_REPO_CONCURRENCY: 8
+
+      # Use the mounted host SSH key for git pull over SSH (git@github.com).
+      GIT_SSH_COMMAND: "ssh -o HostName=ssh.github.com -o Port=443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ${HOST_REPO_DIR:-.}:/host-repos:rw
+      - ./repo_tree/workspace:/app/repo_tree/workspace:rw
+      - ./ring_images:/app/app/static/rings/generated:rw
+      - ${HOST_SSH_DIR:-~/.ssh}:/root/.ssh:ro
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: jira-ai-postgres
+    profiles:
+      - local-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jira_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - jira_ai_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jira_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  jira_ai_postgres_data:

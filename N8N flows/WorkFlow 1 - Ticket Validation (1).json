@@ -1,0 +1,880 @@
+{
+  "name": "WorkFlow 1 - Ticket Validation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jira-ticket",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1504,
+        368
+      ],
+      "id": "f010205f-00e5-4955-be4c-6155aac3b14e",
+      "name": "Jira Webhook",
+      "webhookId": "abda2deb-1273-47b7-b1a7-d473fc99b31a"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "56360089-c438-4e1f-8c7d-ab1874cdb368",
+              "name": "issueKey",
+              "value": "={{ $json.body.issue.key }}",
+              "type": "string"
+            },
+            {
+              "id": "90d7ef65-6433-4b68-8a5b-4cefefe27b60",
+              "name": "summary",
+              "value": "={{ $json.body.issue.fields.summary }}",
+              "type": "string"
+            },
+            {
+              "id": "b6a59f36-438f-4d53-b0f5-4fa815af276e",
+              "name": "description",
+              "value": "={{ $json.body.issue.fields.description ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "8d6b627a-3271-4285-aef2-622c2bfcb4c4",
+              "name": "assignee",
+              "value": "={{ $json.body.issue.fields.assignee?.displayName ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "2e8aa367-ac20-469f-9df7-1806fe92d223",
+              "name": "dueDate",
+              "value": "={{ $json.body.issue.fields.duedate ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "3a1bc456-1234-4567-abcd-ef1234567890",
+              "name": "priority",
+              "value": "={{ $json.body.issue.fields.priority?.name ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "4b2cd567-2345-5678-bcde-f01234567891",
+              "name": "issueType",
+              "value": "={{ $json.body.issue.fields.issuetype?.name ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "5c3de678-3456-6789-cdef-012345678912",
+              "name": "status",
+              "value": "={{ $json.body.issue.fields.status?.name ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "6d4ef789-4567-789a-def0-123456789013",
+              "name": "reporter",
+              "value": "={{ $json.body.issue.fields.reporter?.displayName ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "480dc141-f870-40ae-b946-af5400629f63",
+              "name": "email",
+              "value": "={{ $json.body.issue.fields.assignee?.emailAddress ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "8f2fdb58-0768-49aa-a144-ddfc0a306356",
+              "name": "createdAt",
+              "value": "={{ $json.body.issue.fields.created ?? '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1280,
+        368
+      ],
+      "id": "08b61115-31e0-4c92-afa4-ab4347b1d65c",
+      "name": "Extract Jira Fields"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://13.207.36.226:8000/workflow1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  issueKey: $json.issueKey,\n  summary: $json.summary,\n  description: $json.description,\n  assignee: $json.assignee,\n  email: $json.email,\n  dueDate: $json.dueDate,\n  priority: $json.priority,\n  issueType: $json.issueType,\n  status: $json.status,\n  reporter: $json.reporter,\n  createdAt: $json.createdAt\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1056,
+        368
+      ],
+      "id": "33653126-962a-4990-b6f6-5276387814b2",
+      "name": "Send to Python API"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7e5fg890-5678-89ab-ef01-234567890124",
+              "name": "assignee_channel_id",
+              "value": "={{ $json.assignee_channel_id }}",
+              "type": "string"
+            },
+            {
+              "id": "8f6gh901-6789-9abc-f012-345678901235",
+              "name": "nature",
+              "value": "={{ $json.nature }}",
+              "type": "string"
+            },
+            {
+              "id": "9g7hi012-7890-abcd-0123-456789012346",
+              "name": "llm_review",
+              "value": "={{ $json.llm_review }}",
+              "type": "string"
+            },
+            {
+              "id": "49c3da38-510c-4416-91c0-2ea6f4177f6e",
+              "name": "reporter_channel_id",
+              "value": "={{ $json.reporter_channel_id }}",
+              "type": "string"
+            },
+            {
+              "id": "29786733-3cb1-4d25-8bb4-fb30ff2841ab",
+              "name": "priority",
+              "value": "={{ $json.priority }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -832,
+        368
+      ],
+      "id": "19828fbc-231e-47ca-b107-2e4ddb99dc53",
+      "name": "Extract API Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "nature-check-001",
+              "leftValue": "={{ $json.nature }}",
+              "rightValue": "satisfied",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -608,
+        368
+      ],
+      "id": "c74d033a-bc66-47bc-a834-ba88694a23b6",
+      "name": "Is Satisfied?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $('Extract API Response').item.json.reporter_channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ '⚠️ *Jira Ticket Review — ' + $('Extract Jira Fields').item.json.issueKey + '*\\n\\n*Summary:* ' + $('Extract Jira Fields').item.json.summary + '\\n*Priority:* ' + $('Extract Jira Fields').item.json.priority + '\\n*Assignee:* ' + $('Extract Jira Fields').item.json.assignee + '\\n*Due Date:* ' + $('Extract Jira Fields').item.json.dueDate + '\\n*Nature:* ⚠️ Unsatisfied\\n\\n*LLM Review:*\\n' + $('Extract API Response').item.json.llm_review + '\\n\\n🔗 https://{{YOUR_JIRA_DOMAIN}}/browse/' + $('Extract Jira Fields').item.json.issueKey + '\\n\\n_Reply in this thread to ask follow-up questions._' }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        0,
+        736
+      ],
+      "id": "0fc4aad6-ca9c-4a7f-a10c-1c046c6a1e74",
+      "name": "Slack - Unsatisfied",
+      "webhookId": "77b052a1-8772-4493-993e-a3e557b0e9a6",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// From Slack response\nconst thread_ts = $input.item.json.message_timestamp;\nconst channel_id = $input.item.json.channel;\n\n// From earlier nodes\nconst issueKey = $('Extract Jira Fields').item.json.issueKey;\nconst summary = $('Extract Jira Fields').item.json.summary;\nconst description = $('Extract Jira Fields').item.json.description;\nconst assignee = $('Extract Jira Fields').item.json.assignee;\nconst llm_review = $('Extract API Response').item.json.llm_review;\nconst nature = $('Extract API Response').item.json.nature;\n\nreturn [{\n  json: {\n    thread_ts,\n    channel_id,\n    issueKey,\n    summary,\n    description,\n    assignee,\n    llm_review,\n    nature\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        736
+      ],
+      "id": "9d208496-fe69-4c35-bc6a-b1e6699069b2",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tickets\nSET\n  slack_channel_id = '{{ $json.channel_id }}',\n  slack_thread_ts  = '{{ $json.thread_ts }}'\nWHERE\n  jira_ticket_id = '{{ $json.issueKey }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        416,
+        736
+      ],
+      "id": "5af3b7e6-fdc6-461f-b830-c8c00ee9b80b",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const issueKey = $('Extract Jira Fields').item.json.issueKey;\n\nconst email = \"{{YOUR_JIRA_EMAIL}}\";\nconst apiToken = \"{{YOUR_JIRA_API_TOKEN}}\";\n\nconst credentials = Buffer.from(`${email}:${apiToken}`).toString('base64');\n\nconst response = await this.helpers.request({\n  method: \"POST\",\n  uri: `https://{{YOUR_JIRA_DOMAIN}}/rest/api/2/issue/${issueKey}/transitions`,\n  headers: {\n    \"Authorization\": `Basic ${credentials}`,\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  },\n  body: JSON.stringify({\n    transition: {\n      id: \"3\"\n    }\n  }),\n  resolveWithFullResponse: true\n});\n\nreturn [{ json: { statusCode: response.statusCode, issueKey } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        256
+      ],
+      "id": "67bec280-8746-4980-a9f0-d151ab9bb1f8",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "2c6cae9c-9ae9-4e5f-8857-526424d8bead",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1504,
+        16
+      ],
+      "id": "657e00c3-7b0d-483e-a4b3-807580a213a2",
+      "name": "Webhook",
+      "webhookId": "2c6cae9c-9ae9-4e5f-8857-526424d8bead"
+    },
+    {
+      "parameters": {
+        "jsCode": "const changelog = $input.item.json.body.changelog?.items || [];\n\nconst ignoredFields = [\n  'status',\n  'resolution', \n  'statusCategory',\n  'statusId',\n  'Rank',              // ← ADD THIS\n  'rank',              // ← ADD THIS (lowercase too)\n  'assignee',          // ← when bot auto-assigns\n  'priority',          // ← when bot auto-sets priority\n  'customfield_10019', // ← Rank field ID\n];\n\nconst hasRealChange = changelog.some(\n  item => !ignoredFields.includes(item.field) && \n          !ignoredFields.includes(item.fieldId)\n);\n\nconst isNewTicket = $input.item.json.body.webhookEvent === 'jira:issue_created';\n\nreturn [{\n  json: {\n    ...$input.item.json,\n    shouldProcess: isNewTicket || hasRealChange\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        16
+      ],
+      "id": "56e06dc3-a992-4223-8d30-be6dee9d16de",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ed57220a-e0f0-4918-9b69-5f177c0d7ded",
+              "leftValue": "={{ $json.shouldProcess }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1072,
+        16
+      ],
+      "id": "04ab2b02-4137-4655-aca9-4475423aaeeb",
+      "name": "If"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -848,
+        16
+      ],
+      "id": "1ba627cb-f181-40c0-8f20-099d272b8f9c",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {
+        "jsCode": "const issueKey = $('Extract Jira Fields').item.json.issueKey;\nconst priorityRaw = $('Extract API Response').item.json.priority;\nconst email = \"{{YOUR_JIRA_EMAIL}}\";\nconst apiToken = \"{{YOUR_JIRA_API_TOKEN}}\";\nconst credentials = Buffer.from(`${email}:${apiToken}`).toString('base64');\n\n// Exact Jira priority names\nconst priorityMap = {\n  'P0': 'P0 - Critical (System down / major revenue impact / Blocker)',\n  'P1': 'P1 - High (Major feature not works) and no workaround exists',\n  'P2': 'P2 - Medium (Exists for few users / workaround exists )',\n  'P3': 'P3 - Low (Minor / Exists for less than 10 customers)',\n  'P4': 'P4 - Trivial problem with little impact on progress.'\n};\n\nconst priority = priorityMap[priorityRaw] || priorityRaw;\n\nconst response = await this.helpers.request({\n  method: \"PUT\",\n  uri: `https://{{YOUR_JIRA_DOMAIN}}/rest/api/2/issue/${issueKey}`,\n  headers: {\n    \"Authorization\": `Basic ${credentials}`,\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  },\n  body: JSON.stringify({\n    fields: {\n      priority: {\n        name: priority\n      }\n    }\n  }),\n  resolveWithFullResponse: true\n});\n\nreturn [{ json: { statusCode: response.statusCode, issueKey, priority } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        256
+      ],
+      "id": "3bd6587c-1415-4209-979b-4259e63486f6",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "41e08bbe-cbc8-40e1-8651-cd30e28dd82c",
+              "leftValue": "={{ $json.slack_thread_ts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        624
+      ],
+      "id": "b8ca1e75-3893-4941-bf63-798a3dad3493",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $('Postgres SELECT').item.json.slack_channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ '⚠️ *Jira Ticket Review Update — ' + $('Extract Jira Fields').item.json.issueKey + '*\\n\\n*Summary:* ' + $('Extract Jira Fields').item.json.summary + '\\n*Priority:* ' + $('Extract Jira Fields').item.json.priority + '\\n*Assignee:* ' + $('Extract Jira Fields').item.json.assignee + '\\n*Due Date:* ' + $('Extract Jira Fields').item.json.dueDate + '\\n*Nature:* ⚠️ Unsatisfied\\n\\n*LLM Review:*\\n' + $('Extract API Response').item.json.llm_review + '\\n\\n🔗 https://{{YOUR_JIRA_DOMAIN}}/browse/' + $('Extract Jira Fields').item.json.issueKey + '\\n\\n_Reply in this thread to ask follow-up questions._' }}",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Postgres SELECT').item.json.slack_thread_ts }}"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        0,
+        528
+      ],
+      "id": "1ab80036-02f2-4483-8087-38e2a3b91329",
+      "name": "Send a message",
+      "webhookId": "273f39cb-e24d-45b5-be47-f451eeaa9277",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT slack_thread_ts, slack_channel_id \nFROM tickets \nWHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -416,
+        624
+      ],
+      "id": "53d273c8-c294-47f7-ac2f-ccbfd6c485a9",
+      "name": "Postgres SELECT",
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (ticket_id, sender, message)\nSELECT id, 'bot', '{{ String($('Extract API Response').item.json.llm_review || '').replace(/'/g, \"''\") }}'\nFROM tickets\nWHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        208,
+        528
+      ],
+      "id": "2b138cda-d78d-421a-ae88-584ef109a510",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const issueKey = $('Extract Jira Fields').item.json.issueKey;\nconst email = \"{{YOUR_JIRA_EMAIL}}\";\nconst apiToken = \"{{YOUR_JIRA_API_TOKEN}}\";\nconst credentials = Buffer.from(`${email}:${apiToken}`).toString('base64');\n\nconst response = await this.helpers.request({\n  method: \"PUT\",\n  uri: `https://{{YOUR_JIRA_DOMAIN}}/rest/api/2/issue/${issueKey}`,\n  headers: {\n    \"Authorization\": `Basic ${credentials}`,\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  },\n  body: JSON.stringify({\n    fields: {\n      assignee: {\n        accountId: \"{{YOUR_DEFAULT_ASSIGNEE_ACCOUNT_ID}}\"\n      }\n    }\n  }),\n  resolveWithFullResponse: true\n});\n\nreturn [{ json: { statusCode: response.statusCode, issueKey } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        256
+      ],
+      "id": "231fe72e-df94-4146-b034-6e091f5730e5",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sla_tracking (\n  ticket_id,\n  jira_ticket_id,\n  priority,\n  assignee_slack_id,\n  sla_start_time,\n  sla_deadline,\n  sla_window_hours\n)\nSELECT \n  id,\n  jira_ticket_id,\n  '{{ $('Extract API Response').item.json.priority }}',\n  assigned_user_id,\n  NOW(),\n  NOW() + (\n    CASE '{{ $('Extract API Response').item.json.priority }}'\n      WHEN 'P0' THEN INTERVAL '1 hour'\n      WHEN 'P1' THEN INTERVAL '4 hours'\n      WHEN 'P2' THEN INTERVAL '16 hours'\n      WHEN 'P3' THEN INTERVAL '24 hours'\n      WHEN 'P4' THEN INTERVAL '48 hours'\n      ELSE INTERVAL '24 hours'\n    END\n  ),\n  CASE '{{ $('Extract API Response').item.json.priority }}'\n    WHEN 'P0' THEN 1\n    WHEN 'P1' THEN 4\n    WHEN 'P2' THEN 16\n    WHEN 'P3' THEN 24\n    WHEN 'P4' THEN 48\n    ELSE 24\n  END\nFROM tickets\nWHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}'\nON CONFLICT (jira_ticket_id)\nDO UPDATE SET\n  priority = EXCLUDED.priority,\n  assignee_slack_id = EXCLUDED.assignee_slack_id,\n  sla_start_time = NOW(),\n  sla_deadline = EXCLUDED.sla_deadline,\n  sla_window_hours = EXCLUDED.sla_window_hours,\n  alert_75_sent = FALSE,\n  alert_50_sent = FALSE,\n  alert_25_sent = FALSE,\n  alert_0_sent = FALSE,\n  is_resolved = FALSE;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        576,
+        256
+      ],
+      "id": "3c36b97e-eed5-45f8-927e-c0ac0b8c3ce5",
+      "name": "Execute a SQL query3",
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://13.207.36.226:8000/analyze-ticket/similar",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"summary\": $('Extract Jira Fields').item.json.summary,\n  \"description\": $('Extract Jira Fields').item.json.description\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -416,
+        144
+      ],
+      "id": "4b428cb9-2c36-4150-a148-f1e7f1dbf9f2",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7eac9f73-cb3d-4f2c-9c3d-0c72ae89961e",
+              "leftValue": "={{ $json.total_found }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -208,
+        144
+      ],
+      "id": "cd18c6e6-e093-4509-8629-3be37bb71692",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channelId }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "5bf7b861-7b9e-4951-987b-75952083d403",
+      "name": "Send a message1",
+      "webhookId": "7f50efc2-9f01-4e09-9892-b84ec994fcfd",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "4a55bb66-0668-4559-b7d6-e66f7c65ea63",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const similarTickets = $input.item.json.tickets;\nconst firstTicket = similarTickets[0];\nconst issueKey = $('Extract Jira Fields').item.json.issueKey;\nconst channelId = $('Extract API Response').item.json.reporter_channel_id;\n\n// Debug - check all values\nconsole.log('channelId:', channelId);\nconsole.log('issueKey:', issueKey);\nconsole.log('firstTicket:', JSON.stringify(firstTicket));\n\nconst status = firstTicket.status;\nconst statusLabel = status.toLowerCase() === 'done' || \n                    status.toLowerCase() === 'closed' || \n                    status.toLowerCase() === 'resolved' \n                    ? ' Closed' : ' Open';\n\nconst message = `⚠️ *Similar Ticket Found — ${issueKey}*\\n\\n` +\n  `Your new ticket has a similar existing ticket:\\n\\n` +\n  `*Similar Ticket:* ${firstTicket.ticket_key}\\n` +\n  `*Summary:* ${firstTicket.summary}\\n` +\n  `*Status:* ${statusLabel}\\n` +\n  `*Priority:* ${firstTicket.priority}\\n` +\n  `*Assignee:* ${firstTicket.assignee_name}\\n` +\n  `*Similarity Score:* ${(firstTicket.similarity_score * 100).toFixed(0)}%\\n\\n` +\n  `🔗 https://{{YOUR_JIRA_DOMAIN}}/browse/${firstTicket.ticket_key}\\n\\n` +\n  `_Please review this ticket with Dinesh for further processing.`;\n\nreturn [{\n  json: {\n    channelId: channelId,\n    message: message,\n    issueKey: issueKey,\n    similarTicketKey: firstTicket.ticket_key,\n    similarTicketStatus: status\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "dffd1a4f-01cc-443f-8293-093ca2ce1834",
+      "name": "Code in JavaScript6"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jira Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Jira Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Jira Fields": {
+      "main": [
+        [
+          {
+            "node": "Send to Python API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Python API": {
+      "main": [
+        [
+          {
+            "node": "Extract API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract API Response": {
+      "main": [
+        [
+          {
+            "node": "Is Satisfied?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Satisfied?": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres SELECT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Unsatisfied": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Extract Jira Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack - Unsatisfied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres SELECT": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "11c977f4-8cad-4fd0-9e96-7ba58fa0f97b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "tr3HrJOvMQMKE6l9",
+  "tags": []
+}

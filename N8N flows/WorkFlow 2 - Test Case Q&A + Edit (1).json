@@ -1,0 +1,356 @@
+{
+  "name": "WorkFlow 2 - Test Case Q&A + Edit",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.body.challenge }}",
+        "options": {}
+      },
+      "id": "faf2958b-fc6f-48cf-9843-50e6bbc5a56f",
+      "name": "Respond to URL Verification",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -960,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-challenge",
+              "leftValue": "={{ $json.body.challenge }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c55804fe-3c69-4976-89d7-654ec4025736",
+      "name": "Is URL Verification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -960,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-bot",
+              "leftValue": "={{ $json.body.event.bot_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            },
+            {
+              "id": "check-type",
+              "leftValue": "={{ $json.body.event.type }}",
+              "rightValue": "message",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "c9e9c17b-9a3b-4a03-a8a8-efe184afd3f3",
+              "leftValue": "={{ $json.body.event.thread_ts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ad162d2c-2e9e-4a7c-83e2-a19adc074135",
+      "name": "Is Human Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -736,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "b0eeaf92-9a4d-450e-bd7a-75e65cf2a14b",
+      "name": "Ack Bot Message",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -432,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "e9640b22-af1f-4f28-89ae-32dc381c75ef",
+      "name": "Ack Slack Event",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -432,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.slack_channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.replyText }}",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $json.slack_thread_ts }}"
+            }
+          }
+        }
+      },
+      "id": "64fbbd52-e9d6-4681-b5c8-bf7fc4ca2f57",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        -64
+      ],
+      "webhookId": "f8849348-9e15-40b9-a8e1-031fdbd640fe",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $('Slack_bot').item.json.body.event;\n// Strip Slack user/bot mentions like <@U123> and surrounding whitespace.\nconst raw = (event.text || '').replace(/<@[^>]+>/g, '').trim();\nreturn [{\n  json: {\n    user_id: event.user,\n    slack_channel_id: event.channel,\n    slack_thread_ts: event.thread_ts || event.ts,\n    user_message: raw\n  }\n}];"
+      },
+      "id": "19de3da2-15e6-4476-82f1-39c78dc11635",
+      "name": "Prepare API Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ai.{{YOUR_API_DOMAIN}}/workflow2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "ec1a1bec-ded3-4799-b707-c5e050b90f55",
+      "name": "Send Message to Python API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -208,
+        -64
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const api = $input.item.json || {};\nconst prepared = $('Prepare API Payload').item.json;\nconst reply = api.reply\n  || (api.error ? `\\u26a0\\ufe0f The assistant hit an error: ${api.error}` : null)\n  || 'Sorry, I could not generate a reply just now. Please try again.';\nreturn [{\n  json: {\n    slack_channel_id: api.slack_channel_id || prepared.slack_channel_id,\n    slack_thread_ts: api.slack_thread_ts || prepared.slack_thread_ts,\n    replyText: reply\n  }\n}];"
+      },
+      "id": "268df557-ddfb-495d-ba8d-7b1a0d9e11f2",
+      "name": "Format API Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-events",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5bb52b06-ead6-4bee-8acf-c3de3ee6c7fd",
+      "name": "Slack_bot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        -208
+      ],
+      "webhookId": "slack-chatbot-events"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Is URL Verification?": {
+      "main": [
+        [
+          {
+            "node": "Respond to URL Verification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Human Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Human Message?": {
+      "main": [
+        [
+          {
+            "node": "Ack Slack Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ack Bot Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare API Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Message to Python API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Message to Python API": {
+      "main": [
+        [
+          {
+            "node": "Format API Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format API Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack_bot": {
+      "main": [
+        [
+          {
+            "node": "Is URL Verification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack Slack Event": {
+      "main": [
+        [
+          {
+            "node": "Prepare API Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "1f646fc0-1892-46f5-b8e0-249e76ca881a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "VKwVoH3vVlOSJoyH",
+  "tags": [
+    {
+      "updatedAt": "2026-05-26T10:39:33.643Z",
+      "createdAt": "2026-05-26T10:39:33.643Z",
+      "id": "7QJUU1AwkXO4GpSR",
+      "name": "closing-flow"
+    },
+    {
+      "updatedAt": "2026-05-26T10:39:33.639Z",
+      "createdAt": "2026-05-26T10:39:33.639Z",
+      "id": "DeJtw7HhaDV9rWjE",
+      "name": "ai-governor"
+    }
+  ]
+}

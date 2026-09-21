@@ -1,0 +1,212 @@
+{
+  "name": "WorkFlow 7 - RFT Estimate Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "ca739004-b4cc-4975-9928-39ace805f375",
+      "name": "09:00 Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1408,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/workflow/rft-estimates",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "71c2b805-78d2-484d-9aa7-ed1889ebeeb9",
+      "name": "Call RFT Estimate API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-alerts",
+              "leftValue": "={{ $json.alerts_sent }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aee05105-1857-4fbd-bb91-4b84a22afd9d",
+      "name": "Has Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -976,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alerts = $input.item.json.alerts;\n\nif (!alerts || alerts.length === 0) {\n  return [];\n}\n\nreturn alerts.map(alert => ({\n  json: {\n    channel_id: alert.channel_id,\n    message: alert.message\n  }\n}));"
+      },
+      "id": "3e978013-6ee5-4dbb-82f3-1fe7942ca719",
+      "name": "Split Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "id": "65c0610c-1d22-4932-a885-6daec63db788",
+      "name": "Send Slack Message",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        -528,
+        336
+      ],
+      "webhookId": "a1b2c3d4-0006-4a00-9000-000000000006",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "b187f5c3-a686-46a4-92b9-f6930a0ee0d1",
+      "name": "No Message",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        544
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "09:00 Daily": {
+      "main": [
+        [
+          {
+            "node": "Call RFT Estimate API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call RFT Estimate API": {
+      "main": [
+        [
+          {
+            "node": "Has Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Message?": {
+      "main": [
+        [
+          {
+            "node": "Split Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Alerts": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6cf68ef9-6358-4e79-b799-daac1690c4dc",
+  "meta": {
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "svRRKQvjScCPmUxE",
+  "tags": [
+    {
+      "updatedAt": "2026-05-26T10:39:33.639Z",
+      "createdAt": "2026-05-26T10:39:33.639Z",
+      "id": "DeJtw7HhaDV9rWjE",
+      "name": "ai-governor"
+    },
+    {
+      "updatedAt": "2026-06-10T07:43:40.778Z",
+      "createdAt": "2026-06-10T07:43:40.778Z",
+      "id": "pgosJTDYMwjJuWLa",
+      "name": "doc-review"
+    }
+  ]
+}

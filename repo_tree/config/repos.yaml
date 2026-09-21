@@ -1,0 +1,8 @@
+model: claude-sonnet-4-6
+use_skeleton: true
+max_input_tokens: 180000
+hard_input_token_ceiling: 500000
+max_output_tokens: 32000
+
+# Repositories are dynamically discovered at runtime from the configured repository root.
+repos: []

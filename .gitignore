@@ -1,0 +1,82 @@
+# ==============================================================================
+# AI Governor (JIRA-AI) — Git Ignore Configuration
+# ==============================================================================
+
+# ── Python Bytecode, Caches & Test Coverage ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.coverage.*
+
+# ── Virtual Environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ── Environment Variables & Secrets ──────────────────────────────────────────
+.env
+.env.*
+.env.local
+.env.production
+!.env.example
+
+# ── Frontend & Build Artifacts ────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.vite/
+
+# ── Logs & Runtime Files ──────────────────────────────────────────────────────
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ── IDE, Editor & Agent Directories ───────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/
+.gemini/
+.agents/
+.cursor/
+
+# ── Database & Persistent Storage Directories ─────────────────────────────────
+Data/
+qdrant_storage/
+postgres_data/
+neo4j_data/
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Generated Reports, Screenshots & Export Artifacts ────────────────────────
+*.pdf
+*.docx
+*.xlsx
+Screenshot*.png
+repomix_output/
+
+# ── Workspace Repomix & Generated State ───────────────────────────────────────
+repo_tree/workspace/packed/
+repo_tree/workspace/output/
+repo_tree/workspace/per_repo/
+repo_tree/workspace/jobs.json
+repo_tree/workspace/state.json
+repo_tree/workspace/repomix_state.json
+
+# ── Generated Ring Images & Auxiliary Assets ──────────────────────────────────
+ring_images/
+app/static/rings/generated/

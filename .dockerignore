@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.env
+jira_ticket_exports
+jira_api_poc_outputs
+frontend/node_modules
+frontend/dist

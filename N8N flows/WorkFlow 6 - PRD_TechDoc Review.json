@@ -1,0 +1,602 @@
+{
+  "name": "WorkFlow 6 - PRD/TechDoc Review",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jira-doc-review",
+        "options": {}
+      },
+      "id": "26d7d20c-4dd3-487f-8b5d-b5e8c21904aa",
+      "name": "Jira Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2000,
+        224
+      ],
+      "webhookId": "jira-doc-review"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull issueKey, reporter, summary + raw description (string or ADF) from the Jira webhook.\nconst body = $input.first().json.body || $input.first().json;\nconst issue = body.issue || {};\nconst fields = issue.fields || {};\nconst description = fields.description ?? '';\n// Flatten ADF/string to a quick scan string just for the gate.\nconst scan = (typeof description === 'string') ? description : JSON.stringify(description);\n// Coarse pre-filter (Python API does authoritative extraction + dedup): pass for\n// a raw \"PRD: https://…\" link OR a labelled hyperlink (label + an href both\n// present, e.g. the word \"TechDoc\" linking to a URL via an ADF link mark).\nconst rawLink = /(PRD|Tech\\s*Doc|Technical\\s*Design|Design\\s*Doc)\\s*[:\\-]\\s*https?:\\/\\//i.test(scan);\nconst labelledHyperlink = /(PRD|Tech\\s*Doc|Technical\\s*Design|Design\\s*Doc)/i.test(scan) && /https?:\\/\\//.test(scan);\nconst hasDocLink = rawLink || labelledHyperlink;\nconst issueKey = issue.key || '';\nreturn [{ json: {\n  issueKey,\n  summary: fields.summary || '',\n  description,\n  hasDocLink,\n  reporter: (fields.reporter && fields.reporter.displayName) || '',\n  reporterEmail: (fields.reporter && fields.reporter.emailAddress) || '',\n  jiraUrl: issueKey ? `https://{{YOUR_JIRA_DOMAIN}}/browse/${issueKey}` : ''\n} }];"
+      },
+      "id": "02fc6d02-6f5b-48a1-9297-4a96757e7068",
+      "name": "Extract Jira Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1776,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-link",
+              "leftValue": "={{ $json.hasDocLink }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bfaa0118-5a0a-429f-b7af-37d5322f1ab2",
+      "name": "Has PRD/TechDoc Link?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1568,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/workflow/doc-review",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ issueKey: $json.issueKey, description: $json.description }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "71052af0-415e-498c-a03c-0688028f6d38",
+      "name": "Review Docs (Python API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1344,
+        144
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "4bab1715-d336-44d1-9311-b393d01fd1e6",
+      "name": "No Docs to Review",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1344,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "comment-posted",
+              "leftValue": "={{ $json.commentPosted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0dc26b02-5f7d-4033-9fa4-58e57f83a883",
+      "name": "Review Posted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1120,
+        144
+      ],
+      "notes": "The Python doc-review only posts a Jira comment when a linked document actually changed (reviewed > 0). Notify the reporter only then, so ordinary ticket edits don't spam them."
+    },
+    {
+      "parameters": {},
+      "id": "4624185c-3fa6-42bc-870b-154c5da417a4",
+      "name": "No New Review",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        368
+      ],
+      "notes": "Docs unchanged / not publicly reviewable — no fresh review to announce."
+    },
+    {
+      "parameters": {
+        "url": "=https://{{YOUR_JIRA_DOMAIN}}/rest/api/2/issue/{{ $('Extract Jira Fields').item.json.issueKey }}/comment?maxResults=100",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "jiraSoftwareCloudApi",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "8e7427c5-ae69-4a2d-90b0-41997ae58885",
+      "name": "Fetch Jira Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -928,
+        144
+      ],
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "mKvgFGibDdGVCevK",
+          "name": "Jira SW Cloud account"
+        }
+      },
+      "notes": "Attach your Jira SW Cloud API credential (base URL + email + API token). No $env needed — this instance blocks env access inside Code nodes."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Find the AI-Governor doc-review comment in the Jira comments response,\n// clean it lightly for Slack, and carry it forward. No $env access here.\nconst ctx = $('Extract Jira Fields').first().json;\nconst MARKER = 'AI-GOVERNOR-DOCREVIEW-V1';\nconst resp = $input.first().json || {};\nconst comments = resp.comments || (resp.body && resp.body.comments) || [];\n\nlet reviewBody = '';\nconst match = comments.find(c => (c.body || '').includes(MARKER));\nif (match) reviewBody = match.body || '';\n\nconst cleaned = reviewBody\n  .replace(/\\{anchor:[^}]+\\}/g, '')\n  .replace(/h[0-9]\\.\\s?/g, '')\n  .replace(/\\{panel[^}]*\\}/g, '')\n  .replace(/----/g, '\\u2014')\n  .trim();\n\nreturn [{ json: { ...ctx, reviewBody: cleaned || 'A document review was posted on the ticket.' } }];"
+      },
+      "id": "c244db55-ef66-487d-97d9-58ca049a521d",
+      "name": "Extract Review Comment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a SHORT Slack notification for the ticket reporter.\n// The full review stays on the Jira comment; we only link to the ticket here.\n// reviewBody is still carried through so the bot's chat history gets seeded.\nconst ctx = $input.first().json;            // carries reviewBody + ticket ctx\nconst api = $('Review Docs (Python API)').first().json;\nconst reviewed = api.reviewed || 0;\nconst reviewBody = ctx.reviewBody || '';\nconst jiraUrl = ctx.jiraUrl || `https://{{YOUR_JIRA_DOMAIN}}/browse/${ctx.issueKey}`;\n\nconst greeting = ctx.reporter ? `Hi ${ctx.reporter}, ` : '';\nconst summaryLine = ctx.summary ? `*${ctx.summary}*\\n` : '';\nconst slackText =\n  `📝 *Document Review — ${ctx.issueKey}*\\n` +\n  summaryLine +\n  `${greeting}AI Governor reviewed the PRD/Tech-Doc linked on your ticket ` +\n  `(${reviewed} document${reviewed === 1 ? '' : 's'} updated). The full review is posted as a comment on the ticket.\\n\\n` +\n  `🔗 ${jiraUrl}\\n\\n` +\n  `_Reply in this thread to ask the bot about the review or the documents._`;\n\nreturn [{ json: { ...ctx, reviewBody, slackText, jiraUrl } }];"
+      },
+      "id": "a2909a9e-c1f9-4eaa-a85a-684a2c9777ac",
+      "name": "Prepare Reporter Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT t.slack_thread_ts, t.slack_channel_id\nFROM (SELECT '{{ $('Extract Jira Fields').item.json.issueKey }}'::text AS k) q\nLEFT JOIN tickets t ON t.jira_ticket_id = q.k\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "1c587916-f204-41fd-aee1-e63e5132d128",
+      "name": "Lookup Existing Thread",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -368,
+        384
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "thread-exists",
+              "leftValue": "={{ $json.slack_thread_ts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "291cfaca-1af1-4bef-8c78-c1c02a228f68",
+      "name": "Thread Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $('Lookup Existing Thread').item.json.slack_channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $('Prepare Reporter Message').item.json.slackText }}",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Lookup Existing Thread').item.json.slack_thread_ts }}"
+            }
+          }
+        }
+      },
+      "id": "16eb2329-1d19-4a39-a860-be559befc726",
+      "name": "Notify Reporter (Reply)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "wf6-doc-review-reply",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (ticket_id, sender, message)\nSELECT id, 'bot', '{{ $('Prepare Reporter Message').item.json.reviewBody.replace(/'/g, \"''\") }}'\nFROM tickets\nWHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}';",
+        "options": {}
+      },
+      "id": "6b0ed020-c3f6-499b-96a5-c9bb1077c612",
+      "name": "Append Review To History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT channel_id FROM channelid_table\nWHERE lower(slack_user_name) = lower('{{ $('Extract Jira Fields').item.json.reporter }}')\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "469aae58-373a-467f-8fff-90cb07fea3a5",
+      "name": "Lookup Reporter Slack",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        288
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $('Prepare Reporter Message').item.json.slackText }}",
+        "otherOptions": {}
+      },
+      "id": "499ff645-f525-4aed-8257-0803808e2eef",
+      "name": "Notify Reporter (New)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        224,
+        288
+      ],
+      "webhookId": "wf6-doc-review-new",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tickets (jira_ticket_id, slack_channel_id, slack_thread_ts, status)\nVALUES (\n  '{{ $('Extract Jira Fields').item.json.issueKey }}',\n  '{{ $json.channel || $json.message?.channel }}',\n  '{{ $json.message?.ts || $json.ts }}',\n  'open'\n)\nON CONFLICT (jira_ticket_id)\nDO UPDATE SET\n  slack_channel_id = EXCLUDED.slack_channel_id,\n  slack_thread_ts  = EXCLUDED.slack_thread_ts\nRETURNING id, jira_ticket_id, slack_channel_id, slack_thread_ts;",
+        "options": {}
+      },
+      "id": "37ff0628-a16a-4386-871e-1becc61a446c",
+      "name": "Map Thread to Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        288
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (ticket_id, sender, message)\nSELECT id, 'bot', '{{ $('Prepare Reporter Message').item.json.reviewBody.replace(/'/g, \"''\") }}'\nFROM tickets\nWHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}';",
+        "options": {}
+      },
+      "id": "d69c5bb2-35b4-4807-93e1-8622c029d43e",
+      "name": "Seed Review Into Chat History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        288
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jira Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Jira Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Jira Fields": {
+      "main": [
+        [
+          {
+            "node": "Has PRD/TechDoc Link?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has PRD/TechDoc Link?": {
+      "main": [
+        [
+          {
+            "node": "Review Docs (Python API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Docs to Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Docs (Python API)": {
+      "main": [
+        [
+          {
+            "node": "Review Posted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Posted?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Jira Comments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No New Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Jira Comments": {
+      "main": [
+        [
+          {
+            "node": "Extract Review Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Review Comment": {
+      "main": [
+        [
+          {
+            "node": "Prepare Reporter Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reporter Message": {
+      "main": [
+        [
+          {
+            "node": "Lookup Existing Thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Existing Thread": {
+      "main": [
+        [
+          {
+            "node": "Thread Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Thread Exists?": {
+      "main": [
+        [
+          {
+            "node": "Notify Reporter (Reply)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Reporter Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Reporter (Reply)": {
+      "main": [
+        [
+          {
+            "node": "Append Review To History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Reporter Slack": {
+      "main": [
+        [
+          {
+            "node": "Notify Reporter (New)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Reporter (New)": {
+      "main": [
+        [
+          {
+            "node": "Map Thread to Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Thread to Ticket": {
+      "main": [
+        [
+          {
+            "node": "Seed Review Into Chat History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "daeb1ca6-823c-4373-8872-b07f26690e4e",
+  "meta": {
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "V1iC0lJjasndKoAY",
+  "tags": [
+    {
+      "updatedAt": "2026-05-26T10:39:33.639Z",
+      "createdAt": "2026-05-26T10:39:33.639Z",
+      "id": "DeJtw7HhaDV9rWjE",
+      "name": "ai-governor"
+    },
+    {
+      "updatedAt": "2026-06-10T07:43:40.778Z",
+      "createdAt": "2026-06-10T07:43:40.778Z",
+      "id": "pgosJTDYMwjJuWLa",
+      "name": "doc-review"
+    }
+  ]
+}

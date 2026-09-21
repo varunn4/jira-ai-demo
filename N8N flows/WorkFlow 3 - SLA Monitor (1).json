@@ -1,0 +1,200 @@
+{
+  "name": "WorkFlow 3 - SLA Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "03165c9c-0d4c-4f25-81ee-149784fca715",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -656,
+        112
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://13.207.36.226:8000/workflow3",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "305aa0a3-5937-40d1-ab88-e6495a84f3b7",
+      "name": "Call SLA Monitor API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-alerts",
+              "leftValue": "={{ $json.alerts_sent }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "08058078-b72b-4189-a6fc-a6a7c901aa1a",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alerts = $input.item.json.alerts;\n\nif (!alerts || alerts.length === 0) {\n  return [];\n}\n\nreturn alerts.map(alert => ({\n  json: {\n    channel_id: alert.channel_id,\n    message: alert.message\n  }\n}));"
+      },
+      "id": "0ed201bd-f7c1-4418-a1f4-3da880fcb961",
+      "name": "Split Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "id": "3347e8a6-3713-4151-91f4-8fc616e82a25",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        224,
+        0
+      ],
+      "webhookId": "8a4308b2-4fdf-4190-839d-fc36c135a158",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "4da0c551-0d2e-407b-b4e7-c908caacb7db",
+      "name": "No Alerts Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Call SLA Monitor API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call SLA Monitor API": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Split Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Alerts": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7e2d3d8c-5618-4b60-a099-4fda82be67f7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "GmriNxf7i2QX8dlg",
+  "tags": []
+}

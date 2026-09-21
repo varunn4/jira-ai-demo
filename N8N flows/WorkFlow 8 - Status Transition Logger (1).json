@@ -1,0 +1,97 @@
+{
+  "name": "WorkFlow 8 - Status Transition Logger",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jira-status-transition",
+        "options": {}
+      },
+      "id": "b9fad899-c669-4b7f-a495-c8e235c07216",
+      "name": "Jira Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b2c3d4e5-0099-4a00-9000-000000000099"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract status transitions from the Jira webhook changelog.\n// A single webhook can carry multiple field changes; we emit one item per\n// status change. No status change -> empty output, so nothing is posted.\nconst body = $input.first().json.body || $input.first().json;\nconst issue = body.issue || {};\nconst fields = issue.fields || {};\nconst changelog = body.changelog || {};\nconst items = changelog.items || [];\nconst ts = body.timestamp ? new Date(body.timestamp).toISOString() : new Date().toISOString();\n\nconst out = [];\nfor (const it of items) {\n  if ((it.field || it.fieldId) === 'status') {\n    out.push({\n      json: {\n        issueKey: issue.key || '',\n        fromStatus: it.fromString || '',\n        toStatus: it.toString || '',\n        projectKey: (fields.project && fields.project.key) || '',\n        issueType: (fields.issuetype && fields.issuetype.name) || '',\n        assignee: (fields.assignee && fields.assignee.displayName) || '',\n        changedAt: ts\n      }\n    });\n  }\n}\nreturn out;"
+      },
+      "id": "e0349b8f-8ed4-4193-a90a-ef2622b5477e",
+      "name": "Extract Status Change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/workflow/record-transition",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "4d4b5dcd-e1ee-4161-b186-9de70201b359",
+      "name": "Post Transition",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jira Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Status Change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Status Change": {
+      "main": [
+        [
+          {
+            "node": "Post Transition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "270551e2-93f5-4068-b714-470830853807",
+  "meta": {
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "csoNBssAIFDEHHN1",
+  "tags": []
+}

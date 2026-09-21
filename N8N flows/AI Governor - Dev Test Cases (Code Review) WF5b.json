@@ -1,0 +1,654 @@
+{
+  "name": "AI Governor - Dev Test Cases (Code Review) WF5b",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jira-code-review",
+        "options": {}
+      },
+      "id": "c036f005-2558-40c1-8e32-0a92d93ebc84",
+      "name": "Jira Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        432
+      ],
+      "webhookId": "jira-code-review"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Jira ticket fields from webhook payload.\n// Also flag whether this is a subtask transition vs a parent ticket update.\nconst body   = $input.first().json.body || $input.first().json;\nconst issue  = body.issue || {};\nconst fields = issue.fields || {};\nconst issueType = (fields.issuetype && fields.issuetype.name) || '';\nconst isSubtask = (fields.issuetype && fields.issuetype.subtask) === true;\nconst parentKey = (fields.parent && fields.parent.key) || '';\n\nreturn [{\n  json: {\n    issueKey:    issue.key || '',\n    summary:     fields.summary || '',\n    description: fields.description || '',\n    status:      (fields.status && fields.status.name) || '',\n    statusNormalized: ((fields.status && fields.status.name) || '').trim().toLowerCase(),\n    assignee:    (fields.assignee && fields.assignee.displayName) || '',\n    email:       (fields.assignee && fields.assignee.emailAddress) || '',\n    priority:    (fields.priority && fields.priority.name) || '',\n    issueType,\n    isSubtask,\n    parentKey,\n    reporter:    (fields.reporter && fields.reporter.displayName) || '',\n    projectKey:  (fields.project && fields.project.key) || '',\n    repoUrl:     (fields.customfield_repo_url) || ''\n  }\n}];"
+      },
+      "id": "09cfb127-0cec-44f4-8c5b-0bf316e08b63",
+      "name": "Extract Jira Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-is-subtask",
+              "leftValue": "={{ $json.isSubtask }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7a6e4fc7-b69b-4f70-9f2b-275d4044515d",
+      "name": "Is Subtask?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-code-review",
+              "leftValue": "={{ $json.statusNormalized }}",
+              "rightValue": "code review",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7f2322a5-a422-49ed-b706-961fe295464c",
+      "name": "Parent: Code Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        240
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ee927e05-f641-4558-b980-c5e373c348d9",
+      "name": "Skip (Parent — Other Status)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        592
+      ],
+      "notes": "Parent ticket but not in 'Ready For QA' — nothing to do, exit silently."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/repomix/reindex",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"issueKey\": \"{{ $json.issueKey }}\",\n  \"projectKey\": \"{{ $json.projectKey }}\",\n  \"repoUrl\": \"{{ $json.repoUrl }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "id": "67b67660-c371-447b-8f2e-a2ff35b29710",
+      "name": "Update RepoMix + Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -288,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/testcases/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"issueKey\": \"{{ $('Extract Jira Fields').item.json.issueKey }}\",\n  \"summary\": \"{{ $('Extract Jira Fields').item.json.summary }}\",\n  \"description\": {{ JSON.stringify($('Extract Jira Fields').item.json.description) }},\n  \"projectKey\": \"{{ $('Extract Jira Fields').item.json.projectKey }}\",\n  \"repoUrl\": \"{{ $('Extract Jira Fields').item.json.repoUrl }}\",\n  \"audience\": \"dev\",\n  \"pr_context\": {{ JSON.stringify($('Fetch PR Context').item.json.contextText) }},\n  \"repos\": [\"{{ $('PR Gate').item.json.repo }}\"]\n}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "6d44249b-8380-406a-9685-6eec1c08003e",
+      "name": "Build Test Cases (RepoTree)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize testcases array into a single comment body + DB rows.\nconst api = $input.first().json;\nconst jiraCtx = $('Extract Jira Fields').first().json;\n\nconst testcases = api.testcases || api.test_cases || [];\nconst total = testcases.length;\n\n// Build ONE comment containing all test cases, using Jira wiki markup.\nconst blocks = testcases.map((tc, i) => {\n  const title = tc.title || tc.name || `Test Case ${i + 1}`;\n  const steps = (tc.steps || []).map((s, j) => `  ${j + 1}. ${s}`).join('\\n');\n  const expected = tc.expected || tc.expected_result || '';\n  let b = `*[TC ${i + 1}] ${title}*`;\n  if (steps)    b += `\\n_Steps:_\\n${steps}`;\n  if (expected) b += `\\n_Expected:_ ${expected}`;\n  return b;\n}).join('\\n\\n----\\n\\n');\n\nconst commentBody =\n  `h3. 🧪 Auto-generated Developer Test Cases (${total})\\n` +\n  `_Generated by AI Governor RepoTree for ${jiraCtx.issueKey}._\\n` +\n  `{anchor:AI-GOVERNOR-TESTCASES-DEV-V1}\\n\\n` +\n  blocks;\n\nconst slackMessage = `🧪 *Developer test cases generated for ${jiraCtx.issueKey}*\\n` +\n  `Summary: ${jiraCtx.summary}\\n` +\n  `Total developer test cases: *${total}* (posted as a comment on the ticket)\\n` +\n  `<https://{{YOUR_JIRA_DOMAIN}}/browse/${jiraCtx.issueKey}|Open in Jira>`;\n\nreturn [{\n  json: {\n    ...jiraCtx,\n    totalTestcases: total,\n    testcases,\n    commentBody,\n    slackMessage\n  }\n}];"
+      },
+      "id": "811e2198-0a1a-4389-9254-68523c841756",
+      "name": "Prepare TC Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten testcases into rows for Postgres bulk insert.\n// Test cases now live in a ticket comment (no subtasks), so no subtask_key.\nconst ctx = $input.first().json;\nconst tcs = ctx.testcases || [];\n\nconst rows = tcs.map((tc, i) => ({\n  jira_ticket_id: ctx.issueKey,\n  tc_index: i + 1,\n  subtask_key: null, // no longer creating subtasks; kept for schema compatibility\n  title: tc.title || tc.name || `Test Case ${i + 1}`,\n  steps: JSON.stringify(tc.steps || []),\n  expected: tc.expected || tc.expected_result || ''\n}));\n\nreturn [{\n  json: {\n    ...ctx,\n    rowsToInsert: rows,\n    commentPosted: ctx.commentPosted === true,\n    totalTestcases: tcs.length\n  }\n}];"
+      },
+      "id": "0bc87247-4060-4a70-8330-36901bf71477",
+      "name": "Flatten TCs for DB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH t AS (\n  SELECT id FROM tickets WHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}' LIMIT 1\n)\nINSERT INTO test_cases (ticket_id, jira_ticket_id, phase, tc_index, subtask_key, title, steps, expected, status)\nSELECT\n  (SELECT id FROM t),\n  r.jira_ticket_id, 'dev', r.tc_index, r.subtask_key, r.title, r.steps::jsonb, r.expected, 'pending'\nFROM jsonb_to_recordset('{{ JSON.stringify($json.rowsToInsert).replace(/'/g, \"''\") }}'::jsonb)\n  AS r(jira_ticket_id text, tc_index int, subtask_key text, title text, steps text, expected text)\nON CONFLICT (jira_ticket_id, phase, tc_index)\nDO UPDATE SET\n  subtask_key = EXCLUDED.subtask_key,\n  title = EXCLUDED.title, steps = EXCLUDED.steps, expected = EXCLUDED.expected,\n  status = 'pending', updated_at = NOW()\nRETURNING id, tc_index, subtask_key;",
+        "options": {}
+      },
+      "id": "2b18952d-e71d-4b5f-a091-86c5baa91384",
+      "name": "Save TCs to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1056,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT channel_id FROM channelid_table\nWHERE lower(slack_user_name) = lower('{{ $('Extract Jira Fields').item.json.assignee }}')\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "014bd751-ee70-4ebd-8b7b-f4dcf1a54f35",
+      "name": "Lookup Assignee Slack",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        848,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $('Prepare TC Payload').item.json.slackMessage }}",
+        "otherOptions": {}
+      },
+      "id": "75a372b9-53b5-4a93-8a26-b5d1cd870330",
+      "name": "Slack DM Assignee (TCs Built)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        240
+      ],
+      "webhookId": "64084536-0af6-4687-b600-31a83c753e64",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS testcase_threads (\n  slack_channel_id TEXT NOT NULL,\n  slack_thread_ts  TEXT NOT NULL,\n  jira_ticket_id   TEXT NOT NULL,\n  phase            VARCHAR(8) NOT NULL DEFAULT 'qa',\n  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n  PRIMARY KEY (slack_channel_id, slack_thread_ts)\n);\n\nINSERT INTO tickets (jira_ticket_id, slack_channel_id, slack_thread_ts, status)\nVALUES (\n  '{{ $('Extract Jira Fields').item.json.issueKey }}',\n  '{{ $json.channel || $json.message?.channel }}',\n  '{{ $json.message?.ts || $json.ts }}',\n  '{{ ($('Extract Jira Fields').item.json.status || 'open').replace(/'/g, \"''\") }}'\n)\nON CONFLICT (jira_ticket_id)\nDO UPDATE SET\n  slack_channel_id = EXCLUDED.slack_channel_id,\n  slack_thread_ts  = EXCLUDED.slack_thread_ts;\n\nINSERT INTO testcase_threads (slack_channel_id, slack_thread_ts, jira_ticket_id, phase)\nVALUES (\n  '{{ $json.channel || $json.message?.channel }}',\n  '{{ $json.message?.ts || $json.ts }}',\n  '{{ $('Extract Jira Fields').item.json.issueKey }}',\n  'dev'\n)\nON CONFLICT (slack_channel_id, slack_thread_ts)\nDO UPDATE SET\n  jira_ticket_id = EXCLUDED.jira_ticket_id,\n  phase = EXCLUDED.phase,\n  updated_at = NOW()\nRETURNING jira_ticket_id, phase;",
+        "options": {}
+      },
+      "name": "Map Thread → Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1280,
+        240
+      ],
+      "id": "d47aa748-0fb0-4252-b7b5-eea5668856ac",
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*)::int AS tc_count\nFROM test_cases\nWHERE jira_ticket_id = '{{ $('Extract Jira Fields').item.json.issueKey }}'\n  AND phase = 'dev';",
+        "options": {}
+      },
+      "name": "Check Existing TCs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -272,
+        240
+      ],
+      "id": "a9c0acd4-d22f-4ccd-bc40-5b99bf05ea1c",
+      "credentials": {
+        "postgres": {
+          "id": "xDUSPHNGhltBQIW7",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ Number($json.tc_count ?? 0) > 0 ? 0 : 1 }}"
+      },
+      "name": "TCs Already Exist?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -80,
+        240
+      ],
+      "id": "f789a55e-382b-405c-89df-78dfb3c73b5c"
+    },
+    {
+      "parameters": {},
+      "name": "Skip (TCs Already Generated)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        240,
+        368
+      ],
+      "id": "7def7744-8c42-4537-bbdf-583c563fb65f"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/testcases/document",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ issueKey: $json.issueKey, summary: $json.summary, testcases: $json.testcases, phase: \"dev\" }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "id": "14c41c0c-949f-4bc6-a470-63b76d5a445e",
+      "name": "Attach TC Document (Python API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        128
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/testcases/dev/pr-gate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"issueKey\": \"{{ $('Extract Jira Fields').item.json.issueKey }}\"\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "f8d2f7ec-0314-4458-a127-f5329f45970d",
+      "name": "PR Gate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-pr-ready",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "ready",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1b7f079-92a3-4e80-ba90-ae95acb6ee45",
+      "name": "PR Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        128,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai.{{YOUR_API_DOMAIN}}:8000/testcases/dev/pr-context",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"prUrl\": \"{{ $('PR Gate').item.json.prUrl }}\"\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "b87d4390-ee03-487d-84c7-4eeb98f5e00a",
+      "name": "Fetch PR Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        528,
+        928
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a736b654-5df3-403d-82be-5977a9b1382c",
+      "name": "Skip (Awaiting PR URL)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        496
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jira Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Jira Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Jira Fields": {
+      "main": [
+        [
+          {
+            "node": "Is Subtask?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Subtask?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Parent: Code Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update RepoMix + Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Build Test Cases (RepoTree)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Test Cases (RepoTree)": {
+      "main": [
+        [
+          {
+            "node": "Prepare TC Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare TC Payload": {
+      "main": [
+        [
+          {
+            "node": "Lookup Assignee Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Attach TC Document (Python API)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Flatten TCs for DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten TCs for DB": {
+      "main": [
+        [
+          {
+            "node": "Save TCs to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Assignee Slack": {
+      "main": [
+        [
+          {
+            "node": "Slack DM Assignee (TCs Built)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack DM Assignee (TCs Built)": {
+      "main": [
+        [
+          {
+            "node": "Map Thread → Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing TCs": {
+      "main": [
+        [
+          {
+            "node": "TCs Already Exist?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TCs Already Exist?": {
+      "main": [
+        [
+          {
+            "node": "Skip (TCs Already Generated)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update RepoMix + Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parent: Code Review?": {
+      "main": [
+        [
+          {
+            "node": "PR Gate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip (Parent — Other Status)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PR Gate": {
+      "main": [
+        [
+          {
+            "node": "PR Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PR Ready?": {
+      "main": [
+        [
+          {
+            "node": "Fetch PR Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip (Awaiting PR URL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch PR Context": {
+      "main": [
+        [
+          {
+            "node": "Check Existing TCs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "059086c8-6001-446a-a4ee-c54df27c52e9",
+  "meta": {
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "uex6IpdKLOlHOjxQ",
+  "tags": [
+    {
+      "updatedAt": "2026-05-26T10:39:33.639Z",
+      "createdAt": "2026-05-26T10:39:33.639Z",
+      "id": "DeJtw7HhaDV9rWjE",
+      "name": "ai-governor"
+    },
+    {
+      "updatedAt": "2026-07-27T07:43:02.042Z",
+      "createdAt": "2026-07-27T07:43:02.042Z",
+      "id": "cCwnYxqxRN0pQhCL",
+      "name": "code-review"
+    }
+  ]
+}

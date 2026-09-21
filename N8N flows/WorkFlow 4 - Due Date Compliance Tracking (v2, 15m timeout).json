@@ -1,0 +1,401 @@
+{
+  "name": "WorkFlow 4 - Due Date Compliance Tracking (v2, 15m timeout)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "22be81e1-31dc-410e-a6ad-e8f0636bef7a",
+      "name": "09:00 Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -656,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://13.207.36.226:8000/workflow4/daily-assignee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "9884abe6-ebbd-4958-9201-841bf3ccedb1",
+      "name": "Call Assignee Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "chk",
+              "leftValue": "={{ $json.alerts_sent }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2fe57e36-a85a-4e65-a5d5-e08d016801aa",
+      "name": "Has Alerts? (AM)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alerts = $input.item.json.alerts;\nif (!alerts || alerts.length === 0) { return []; }\nreturn alerts.map(a => ({ json: { channel_id: a.channel_id, message: a.message, blocks: a.blocks } }));"
+      },
+      "id": "93816bf8-3da3-4bac-81a4-1c2f3effc547",
+      "name": "Split Alerts (AM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "id": "be03a3ad-3798-4290-a787-6b72ca8f0d9e",
+      "name": "Send Slack Alert (AM)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        224,
+        176
+      ],
+      "webhookId": "wf4-am-slack",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "88bd073c-c0b2-4c19-bcbe-1cd34b8693b7",
+      "name": "No Alerts (AM)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 * * *"
+            }
+          ]
+        }
+      },
+      "id": "f07c58e5-eaf9-4b1e-8fc8-380bd51702f2",
+      "name": "15:00 Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -656,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://13.207.36.226:8000/workflow4/tl",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "3cb0d937-6940-40b2-b850-8eebe884e5a1",
+      "name": "Call TL Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "chk",
+              "leftValue": "={{ $json.alerts_sent }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bebd364e-b9ca-43af-bdcf-1885df3dba5f",
+      "name": "Has Alerts? (PM)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alerts = $input.item.json.alerts;\nif (!alerts || alerts.length === 0) { return []; }\nreturn alerts.map(a => ({ json: { channel_id: a.channel_id, message: a.message, blocks: a.blocks } }));"
+      },
+      "id": "efbe79ba-557e-4af0-8a10-50cb3e5666c6",
+      "name": "Split Alerts (PM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "id": "4ccd7a55-96df-4d1b-852a-70ac9bdc1258",
+      "name": "Send Slack Alert (PM)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        224,
+        496
+      ],
+      "webhookId": "wf4-pm-slack",
+      "credentials": {
+        "slackApi": {
+          "id": "NuUkv5zUdWJ4qcop",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "e22923a4-0b6c-4fb5-9b32-dc232fd0dc34",
+      "name": "No Alerts (PM)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        624
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "09:00 Daily": {
+      "main": [
+        [
+          {
+            "node": "Call Assignee Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Assignee Check": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts? (AM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts? (AM)": {
+      "main": [
+        [
+          {
+            "node": "Split Alerts (AM)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts (AM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Alerts (AM)": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert (AM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15:00 Daily": {
+      "main": [
+        [
+          {
+            "node": "Call TL Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call TL Check": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts? (PM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts? (PM)": {
+      "main": [
+        [
+          {
+            "node": "Split Alerts (PM)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts (PM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Alerts (PM)": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert (PM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "add8a207-8729-4b57-a341-bbb0bf3e0175",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c36daaf628015ee3f2cbb4732e9ded86da6e8f3b8ddad8fca148925844e4feeb"
+  },
+  "id": "gykbEpb5xy8ZmeQ1",
+  "tags": [
+    {
+      "updatedAt": "2026-05-26T10:39:33.639Z",
+      "createdAt": "2026-05-26T10:39:33.639Z",
+      "id": "DeJtw7HhaDV9rWjE",
+      "name": "ai-governor"
+    },
+    {
+      "updatedAt": "2026-06-15T07:57:27.999Z",
+      "createdAt": "2026-06-15T07:57:27.999Z",
+      "id": "IfinOB5gJhnXY7Wn",
+      "name": "aigov"
+    },
+    {
+      "updatedAt": "2026-06-11T06:02:44.872Z",
+      "createdAt": "2026-06-11T06:02:44.872Z",
+      "id": "mjBSyTodF1F1vnx9",
+      "name": "due-date"
+    }
+  ]
+}
