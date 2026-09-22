@@ -70,6 +70,8 @@ Screenshot*.png
 repomix_output/
 
 # ── Workspace Repomix & Generated State ───────────────────────────────────────
+workspace/
+repo_tree/workspace/
 repo_tree/workspace/packed/
 repo_tree/workspace/output/
 repo_tree/workspace/per_repo/

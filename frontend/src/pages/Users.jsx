@@ -148,6 +148,9 @@ export default function Users() {
             <input
               className="tc-input"
               type="email"
+              name="new_user_create_email"
+              autoComplete="off"
+              data-lpignore="true"
               required
               value={form.email}
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
@@ -160,6 +163,9 @@ export default function Users() {
             <input
               className="tc-input"
               type="password"
+              name="new_user_create_password"
+              autoComplete="new-password"
+              data-lpignore="true"
               required
               minLength={6}
               value={form.password}

@@ -10,7 +10,10 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
   // Raw form data
   const [formData, setFormData] = useState({
-    repository_search_root: "",
+    github_source_type: "org",
+    github_org_or_user: "",
+    github_repo_urls: "",
+    github_token: "",
     excluded_repository_names: "",
     jira_base_url: "",
     jira_email: "",
@@ -33,6 +36,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
   // Masked flags
   const [meta, setMeta] = useState({
+    github_has_token: false,
     jira_has_token: false,
     openai_has_key: false,
     anthropic_has_key: false,
@@ -41,6 +45,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
   // Track if user explicitly clicked "Change/Replace" for secret fields
   const [editSecrets, setEditSecrets] = useState({
+    github_token: false,
     jira_api_token: false,
     openai_api_key: false,
     anthropic_api_key: false,
@@ -76,10 +81,17 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     setLlmTestResult(null);
 
     try {
-      const data = await apiFetch("/api/settings");
+      const [data, statusData] = await Promise.all([
+        apiFetch("/api/settings").catch(() => null),
+        apiFetch("/api/settings/status").catch(() => null),
+      ]);
+
       if (data) {
         setFormData({
-          repository_search_root: data.repository_search_root || "",
+          github_source_type: data.github_source_type || "org",
+          github_org_or_user: data.github_org_or_user || "",
+          github_repo_urls: data.github_repo_urls || "",
+          github_token: "",
           excluded_repository_names: data.excluded_repository_names || "",
           jira_base_url: data.jira_base_url || "",
           jira_email: data.jira_email || "",
@@ -101,6 +113,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
         });
 
         setMeta({
+          github_has_token: data.github_has_token,
           jira_has_token: data.jira_has_token,
           openai_has_key: data.openai_has_key,
           anthropic_has_key: data.anthropic_has_key,
@@ -108,11 +121,21 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
         });
 
         setEditSecrets({
+          github_token: !data.github_has_token,
           jira_api_token: !data.jira_has_token,
           openai_api_key: !data.openai_has_key,
           anthropic_api_key: !data.anthropic_has_key,
           slack_bot_token: !data.slack_bot_token_masked,
           n8n_api_key: !data.n8n_has_key,
+        });
+      }
+
+      if (statusData && statusData.repositories_count > 0) {
+        setRepoValidation({
+          valid: true,
+          repo_count: statusData.repositories_count,
+          repos: statusData.repositories || [],
+          message: `Found ${statusData.repositories_count} repository(ies) active in workspace.`,
         });
       }
     } catch (err) {
@@ -156,15 +179,23 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     setLlmTestResult(null);
   };
 
-  async function handleValidateRepo() {
+  async function handleValidateGithub() {
     setValidatingRepo(true);
     setRepoValidation(null);
     try {
-      const res = await apiFetch("/api/settings/validate-repo-path", {
+      const res = await apiFetch("/api/settings/validate-github", {
         method: "POST",
-        body: { path: formData.repository_search_root || "." },
+        body: {
+          source_type: formData.github_source_type,
+          github_org_or_user: formData.github_org_or_user,
+          github_repo_urls: formData.github_repo_urls,
+          github_token: formData.github_token,
+        },
       });
       setRepoValidation(res);
+      if (res.valid) {
+        setSaveSuccess(`Synchronized ${res.repo_count} repositories from GitHub!`);
+      }
     } catch (err) {
       setRepoValidation({
         valid: false,
@@ -250,6 +281,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
     // Prepare payload only including updated secrets if edited
     const payload = { ...formData };
+    if (!editSecrets.github_token && !formData.github_token) delete payload.github_token;
     if (!editSecrets.jira_api_token && !formData.jira_api_token) delete payload.jira_api_token;
     if (!editSecrets.openai_api_key && !formData.openai_api_key) delete payload.openai_api_key;
     if (!editSecrets.anthropic_api_key && !formData.anthropic_api_key) delete payload.anthropic_api_key;
@@ -280,7 +312,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           <div>
             <h2 className="modal-title">⚙️ System Configuration</h2>
             <p className="modal-subtitle">
-              Manage repository discovery paths, Jira credentials, and AI inference models.
+              Manage GitHub repositories, Jira credentials, and AI inference models.
             </p>
           </div>
           <button className="modal-close-btn" onClick={onClose}>
@@ -294,7 +326,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
             className={`modal-tab-btn ${activeTab === "repos" ? "active" : ""}`}
             onClick={() => setActiveTab("repos")}
           >
-            📁 Repositories
+            🐙 GitHub Repos
           </button>
           <button
             className={`modal-tab-btn ${activeTab === "jira" ? "active" : ""}`}
@@ -331,28 +363,95 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
               {activeTab === "repos" && (
                 <div className="settings-section">
                   <div className="callout callout-info">
-                    <strong>Directory Scan:</strong> Point to the root directory where your codebases are stored. Subfolders with a <code>.git</code> directory are automatically indexed for the Knowledge Graph.
+                    <strong>🐙 GitHub Ingestion:</strong> Connect your GitHub organization or specific repository URLs. Repositories are automatically cloned into the managed workspace for graph analysis and ticket tracing.
                   </div>
 
-                  <div className="form-group" style={{ marginTop: "14px" }}>
-                    <label className="field-label">Repository Search Root</label>
-                    <div className="input-with-action">
+                  {/* Mode Toggle */}
+                  <div className="github-mode-toggle" style={{ marginTop: "14px" }}>
+                    <button
+                      type="button"
+                      className={`github-mode-btn ${formData.github_source_type === "org" ? "active" : ""}`}
+                      onClick={() => handleChange("github_source_type", "org")}
+                    >
+                      🏢 GitHub Organization / Account
+                    </button>
+                    <button
+                      type="button"
+                      className={`github-mode-btn ${formData.github_source_type === "urls" ? "active" : ""}`}
+                      onClick={() => handleChange("github_source_type", "urls")}
+                    >
+                      🔗 Specific Repository URLs
+                    </button>
+                  </div>
+
+                  {formData.github_source_type === "org" ? (
+                    <div className="form-group">
+                      <label className="field-label">GitHub Organization or Username</label>
                       <input
                         type="text"
+                        name="settings_gh_org_ident"
+                        autoComplete="off"
+                        data-lpignore="true"
                         className="field-input"
-                        placeholder="e.g. C:\Users\Username\Projects or /home/dev/repos"
-                        value={formData.repository_search_root}
-                        onChange={(e) => handleChange("repository_search_root", e.target.value)}
+                        placeholder="e.g. AonamiTech or your-handle"
+                        value={formData.github_org_or_user}
+                        onChange={(e) => handleChange("github_org_or_user", e.target.value)}
                       />
-                      <button
-                        type="button"
-                        className="action-btn"
-                        onClick={handleValidateRepo}
-                        disabled={validatingRepo}
-                      >
-                        {validatingRepo ? "Scanning..." : "🔍 Scan Directory"}
-                      </button>
                     </div>
+                  ) : (
+                    <div className="form-group">
+                      <label className="field-label">GitHub Repository URLs or Slugs</label>
+                      <textarea
+                        name="settings_gh_repos_urls"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        className="field-input"
+                        style={{ minHeight: "75px", resize: "vertical" }}
+                        placeholder="e.g.&#10;https://github.com/AonamiTech/trail-main&#10;https://github.com/org/service"
+                        value={formData.github_repo_urls}
+                        onChange={(e) => handleChange("github_repo_urls", e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label className="field-label">GitHub Personal Access Token (PAT)</label>
+                    {meta.github_has_token && !editSecrets.github_token ? (
+                      <div className="secret-saved-row">
+                        <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
+                        <button
+                          type="button"
+                          className="btn-text-action"
+                          onClick={() => setEditSecrets((p) => ({ ...p, github_token: true }))}
+                        >
+                          Change Token
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        type="password"
+                        name="settings_gh_pat_token_field"
+                        autoComplete="new-password"
+                        data-lpignore="true"
+                        className="field-input"
+                        placeholder="ghp_... or github_pat_..."
+                        value={formData.github_token}
+                        onChange={(e) => handleChange("github_token", e.target.value)}
+                      />
+                    )}
+                    <span className="field-hint">Optional for public repos. Required for private repos & rate limits.</span>
+                  </div>
+
+                  <div style={{ marginTop: "14px" }}>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ width: "auto", padding: "8px 20px" }}
+                      onClick={handleValidateGithub}
+                      disabled={validatingRepo}
+                    >
+                      {validatingRepo ? "⚡ Syncing Repositories from GitHub..." : "⚡ Sync Repositories from GitHub"}
+                    </button>
                   </div>
 
                   {repoValidation && (
@@ -360,35 +459,32 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       className={`validation-box ${
                         repoValidation.valid && repoValidation.repo_count > 0
                           ? "box-success"
-                          : repoValidation.valid
-                          ? "box-warning"
                           : "box-danger"
                       }`}
+                      style={{ marginTop: "14px" }}
                     >
                       {repoValidation.valid && repoValidation.repo_count > 0 ? (
                         <div>
                           <div className="box-title">
-                            ✅ Discovered {repoValidation.repo_count} Git Repository(ies)
+                            ✅ Active Repositories ({repoValidation.repo_count})
                           </div>
-                          <div className="repo-tags-grid">
+                          <div className="github-repo-card-grid">
                             {repoValidation.repos.map((name) => (
-                              <span key={name} className="repo-tag">
-                                📦 {name}
-                              </span>
+                              <div key={name} className="github-repo-card">
+                                <div className="github-repo-card-head">
+                                  <span className="github-repo-card-name" title={name}>📦 {name}</span>
+                                </div>
+                                <div className="github-repo-card-badges">
+                                  <span className="github-badge-status">✓ Ready</span>
+                                  <span className="github-badge-branch">main</span>
+                                </div>
+                              </div>
                             ))}
                           </div>
-                          {repoValidation.resolved_path && (
-                            <div className="box-sub">Resolved Path: {repoValidation.resolved_path}</div>
-                          )}
-                        </div>
-                      ) : repoValidation.valid ? (
-                        <div>
-                          <div className="box-title">⚠️ 0 Git repositories found</div>
-                          <div className="box-sub">{repoValidation.message}</div>
                         </div>
                       ) : (
                         <div>
-                          <div className="box-title">❌ Path Error</div>
+                          <div className="box-title">❌ GitHub Sync Error</div>
                           <div className="box-sub">{repoValidation.error}</div>
                         </div>
                       )}
@@ -430,6 +526,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       <label className="field-label">Jira Base URL</label>
                       <input
                         type="url"
+                        name="settings_jira_base_url"
+                        autoComplete="off"
+                        data-lpignore="true"
                         className="field-input"
                         placeholder="https://yourcompany.atlassian.net"
                         value={formData.jira_base_url}
@@ -440,6 +539,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       <label className="field-label">Jira Account Email</label>
                       <input
                         type="email"
+                        name="settings_jira_account_email"
+                        autoComplete="off"
+                        data-lpignore="true"
                         className="field-input"
                         placeholder="name@company.com"
                         value={formData.jira_email}
@@ -464,6 +566,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     ) : (
                       <input
                         type="password"
+                        name="settings_jira_api_token_field"
+                        autoComplete="new-password"
+                        data-lpignore="true"
                         className="field-input"
                         placeholder="Enter new Jira API Token (ATATT...)"
                         value={formData.jira_api_token}
@@ -477,6 +582,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       <label className="field-label">Target Project Keys</label>
                       <input
                         type="text"
+                        name="settings_jira_proj_keys"
+                        autoComplete="off"
+                        data-lpignore="true"
                         className="field-input"
                         placeholder="e.g. SCRUM, PROJ"
                         value={formData.jira_project_key}
@@ -488,6 +596,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       <label className="field-label">Excluded Project Keys</label>
                       <input
                         type="text"
+                        name="settings_jira_excl_keys"
+                        autoComplete="off"
+                        data-lpignore="true"
                         className="field-input"
                         placeholder="e.g. ARCHIVE, TEST"
                         value={formData.jira_excluded_project_keys}
@@ -619,6 +730,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         ) : (
                           <input
                             type="password"
+                            name="settings_anthropic_api_key_field"
+                            autoComplete="new-password"
+                            data-lpignore="true"
                             className="field-input"
                             placeholder="sk-ant-api03-..."
                             value={formData.anthropic_api_key}
@@ -630,6 +744,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         <label className="field-label">Model Identifier</label>
                         <input
                           type="text"
+                          name="settings_anthropic_model_field"
+                          autoComplete="off"
+                          data-lpignore="true"
                           className="field-input"
                           value={formData.anthropic_model}
                           onChange={(e) => handleChange("anthropic_model", e.target.value)}
@@ -661,6 +778,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                           ) : (
                             <input
                               type="password"
+                              name="settings_openai_api_key_field"
+                              autoComplete="new-password"
+                              data-lpignore="true"
                               className="field-input"
                               placeholder={
                                 formData.llm_provider === "groq"
@@ -681,6 +801,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                           <label className="field-label">Model Identifier</label>
                           <input
                             type="text"
+                            name="settings_model_id_field"
+                            autoComplete="off"
+                            data-lpignore="true"
                             className="field-input"
                             value={formData.llm_model}
                             onChange={(e) => handleChange("llm_model", e.target.value)}
@@ -691,6 +814,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                             <label className="field-label">API Base URL</label>
                             <input
                               type="text"
+                              name="settings_base_url_field"
+                              autoComplete="off"
+                              data-lpignore="true"
                               className="field-input"
                               value={formData.openai_base_url}
                               onChange={(e) => handleChange("openai_base_url", e.target.value)}

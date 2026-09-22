@@ -93,7 +93,7 @@ export default function Login() {
             style={{ width: "100%", fontSize: "12px", minHeight: "34px", opacity: 0.85 }}
             onClick={() => {
               setEmail("admin@yourcompany.com");
-              setPassword("adminpassword123");
+              setPassword("admin123");
               setError("");
             }}
           >

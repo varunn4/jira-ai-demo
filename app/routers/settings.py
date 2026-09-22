@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -13,7 +14,13 @@ from app.app_settings import get_all_settings, get_all_user_settings, set_settin
 from app.auth import CurrentUser, require_tab
 from app.config import reload_settings, settings
 from app.llm_client import build_llm_client
-from app.repository_discovery import discover_graph_repositories
+from app.repository_discovery import (
+    clone_or_sync_repo,
+    discover_graph_repositories,
+    fetch_github_org_repos,
+    fetch_single_github_repo,
+    get_workspace_repos_dir,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,30 +43,23 @@ def get_setup_status(_user: CurrentUser = Depends(require_tab("repos"))) -> dict
 
     missing: list[str] = []
 
-    # 1. Repositories path
-    repo_root = db_items.get("repository_search_root", settings.repository_search_root).strip() if db_items.get("repository_search_root") else ""
-    if not repo_root or repo_root == ".":
-        # Check if any git repo exists under current root
-        repos = discover_graph_repositories(settings)
-        if not repos:
-            missing.append("repositories")
-    else:
-        p = Path(repo_root).expanduser().resolve()
-        if not p.is_dir():
-            missing.append("repositories")
+    # 1. Repositories (check if user has synced repositories into workspace)
+    repos = discover_graph_repositories(settings)
+    if not repos:
+        missing.append("repositories")
 
     # 2. Jira credentials
-    jira_url = db_items.get("jira_base_url", settings.jira_base_url)
-    jira_email = db_items.get("jira_email", settings.jira_email)
-    jira_token = db_items.get("jira_api_token", settings.jira_api_token)
+    jira_url = db_items.get("jira_base_url")
+    jira_email = db_items.get("jira_email")
+    jira_token = db_items.get("jira_api_token")
     if not (jira_url and jira_email and jira_token):
         missing.append("jira")
 
     # 3. LLM Configuration
-    provider = db_items.get("llm_provider", settings.llm_provider).strip().lower()
-    openai_key = db_items.get("openai_api_key", settings.openai_api_key)
-    anthropic_key = db_items.get("anthropic_api_key", settings.anthropic_api_key)
-    if provider == "groq" or provider == "openai":
+    provider = db_items.get("llm_provider", "groq").strip().lower()
+    openai_key = db_items.get("openai_api_key")
+    anthropic_key = db_items.get("anthropic_api_key")
+    if provider in ("groq", "openai", "gemini"):
         if not openai_key:
             missing.append("llm")
     elif provider == "anthropic":
@@ -71,15 +71,18 @@ def get_setup_status(_user: CurrentUser = Depends(require_tab("repos"))) -> dict
         if not openai_key and not anthropic_key:
             missing.append("llm")
 
-    # Setup is complete only if all mandatory connection sections are configured
+    # Setup is complete only if setup_completed is marked true AND all mandatory sections are configured
+    is_setup_done = db_items.get("setup_completed") == "true"
+
     return {
-        "setup_complete": len(missing) == 0,
+        "setup_complete": is_setup_done and len(missing) == 0,
         "missing_sections": missing,
         "repository_configured": "repositories" not in missing,
         "jira_configured": "jira" not in missing,
         "llm_configured": "llm" not in missing,
         "current_provider": provider,
-        "current_repo_root": repo_root,
+        "repositories_count": len(repos),
+        "repositories": [r["name"] for r in repos],
     }
 
 
@@ -99,6 +102,11 @@ def get_settings_view(_user: CurrentUser = Depends(require_tab("repos"))) -> dic
     db_items = get_all_user_settings(settings, user_id=getattr(_user, "id", None), user_email=getattr(_user, "email", None))
 
     return {
+        "github_source_type": db_items.get("github_source_type", "org"),
+        "github_org_or_user": db_items.get("github_org_or_user", getattr(settings, "github_org", "")),
+        "github_repo_urls": db_items.get("github_repo_urls", ""),
+        "github_token_masked": _mask_secret(db_items.get("github_token", getattr(settings, "github_token", ""))),
+        "github_has_token": bool(db_items.get("github_token", getattr(settings, "github_token", ""))),
         "repository_search_root": db_items.get("repository_search_root", getattr(settings, "repository_search_root", ".")),
         "excluded_repository_names": db_items.get("excluded_repository_names", getattr(settings, "excluded_repository_names", "JIRA-AI")),
         "jira_base_url": db_items.get("jira_base_url", getattr(settings, "jira_base_url", "")),
@@ -135,6 +143,11 @@ def save_settings(
 
     allowed_keys = {
         "setup_completed",
+        "github_source_type",
+        "github_org_or_user",
+        "github_repo_urls",
+        "github_token",
+        "github_org",
         "repository_search_root",
         "repository_host_root",
         "rca_repo_root",
@@ -166,7 +179,10 @@ def save_settings(
             # Do not overwrite with placeholder masked value
             if "..." in v_str and "masked" in k:
                 continue
-            if k == "repository_search_root":
+            if k == "github_org_or_user":
+                to_save["github_org_or_user"] = v_str
+                to_save["github_org"] = v_str
+            elif k == "repository_search_root":
                 to_save["repository_search_root"] = v_str
                 to_save["repository_host_root"] = v_str
                 to_save["rca_repo_root"] = v_str
@@ -192,101 +208,100 @@ def save_settings(
     return {"status": "ok", "message": "Settings saved successfully", "saved_keys": list(to_save.keys())}
 
 
-@router.post("/validate-repo-path")
-def validate_repo_path(
+@router.post("/validate-github")
+def validate_github_integration(
     payload: dict[str, Any],
     _user: CurrentUser = Depends(require_tab("repos")),
 ) -> dict[str, Any]:
-    """Test a repository path on disk and return discovered git repositories."""
-    raw_path = str(payload.get("path") or "").strip()
-    if not raw_path:
-        return {"valid": False, "error": "Path cannot be empty", "repo_count": 0, "repos": []}
+    """Test GitHub credentials/URLs and clone/sync target repositories into managed workspace."""
+    source_type = str(payload.get("source_type") or "org").strip().lower()
+    org_or_user = str(payload.get("github_org_or_user") or "").strip()
+    raw_urls = str(payload.get("github_repo_urls") or "").strip()
+    token = str(payload.get("github_token") or "").strip()
 
-    is_docker = os.path.exists("/.dockerenv") or Path("/host-repos").exists()
+    # Fallback to saved token if not explicitly provided or masked
+    db_items = get_all_user_settings(settings, user_id=getattr(_user, "id", None), user_email=getattr(_user, "email", None))
+    if not token or "..." in token:
+        token = db_items.get("github_token", getattr(settings, "github_token", ""))
 
-    # Detect Windows-style drive letter on a Linux / Docker host
-    if is_docker and (len(raw_path) >= 2 and raw_path[1] == ":" and raw_path[0].isalpha()):
-        # Check if the folder exists inside /host-repos by basename or relative path
-        folder_name = Path(raw_path.replace("\\", "/")).name
-        alt_host_path = Path("/host-repos") / folder_name
-        if alt_host_path.is_dir():
-            path_obj = alt_host_path
+    discovered_meta: list[dict[str, Any]] = []
+
+    try:
+        if source_type == "org":
+            if not org_or_user:
+                return {"valid": False, "error": "GitHub Organization or Username is required.", "repo_count": 0, "repos": []}
+            discovered_meta = fetch_github_org_repos(org_or_user, token=token)
+            if not discovered_meta:
+                return {"valid": False, "error": f"No repositories found under GitHub organization/user '{org_or_user}'.", "repo_count": 0, "repos": []}
         else:
-            return {
-                "valid": False,
-                "error": (
-                    f"You entered a Windows host path ('{raw_path}'). "
-                    "Because Jira AI is running inside a Docker Linux container, it cannot directly access "
-                    "Windows drive letters outside Docker's mounted volume. "
-                    "Inside Docker, your mounted projects directory is at '/host-repos'. "
-                    "To index repositories: clone/place them inside this project folder (accessed via '/host-repos'), "
-                    "or set HOST_REPO_DIR in .env to your projects folder."
-                ),
-                "repo_count": 0,
-                "repos": [],
-            }
-    else:
+            # Specific URLs or slugs
+            if not raw_urls:
+                return {"valid": False, "error": "Please provide at least one GitHub repository URL or slug (e.g. 'AonamiTech/trail').", "repo_count": 0, "repos": []}
+
+            # Parse lines or comma-separated URLs
+            url_candidates = [u.strip() for u in re.split(r"[\n,]+", raw_urls) if u.strip()]
+            if not url_candidates:
+                return {"valid": False, "error": "No valid GitHub repository URLs found in input.", "repo_count": 0, "repos": []}
+
+            for candidate in url_candidates:
+                meta = fetch_single_github_repo(candidate, token=token)
+                discovered_meta.append(meta)
+
+    except Exception as exc:
+        log.warning("GitHub repository discovery failed: %s", exc)
+        return {"valid": False, "error": str(exc), "repo_count": 0, "repos": []}
+
+    # Clone / Sync discovered repositories
+    cloned_repos: list[dict[str, Any]] = []
+    failed_clones: list[dict[str, str]] = []
+
+    for meta in discovered_meta:
+        clone_url = meta.get("clone_url")
+        name = meta.get("name")
+        branch = meta.get("default_branch", "main")
+        if not clone_url or not name:
+            continue
         try:
-            path_obj = Path(raw_path).expanduser().resolve()
-            # If path doesn't exist but is a relative name under /host-repos in Docker
-            if is_docker and not path_obj.exists() and (Path("/host-repos") / raw_path.lstrip("/\\")).exists():
-                path_obj = (Path("/host-repos") / raw_path.lstrip("/\\")).resolve()
-        except Exception as exc:
-            return {"valid": False, "error": f"Invalid path syntax: {exc}", "repo_count": 0, "repos": []}
+            info = clone_or_sync_repo(clone_url=clone_url, target_name=name, token=token, branch=branch)
+            cloned_repos.append(info)
+        except Exception as clone_exc:
+            log.warning("Failed cloning repo %s: %s", name, clone_exc)
+            failed_clones.append({"name": name, "error": str(clone_exc)})
 
-    if not path_obj.exists():
+    if not cloned_repos and failed_clones:
         return {
             "valid": False,
-            "error": f"Directory '{path_obj}' does not exist on the server/host.",
+            "error": f"Failed to clone repositories: {', '.join(f.get('name', '') + ' (' + f.get('error', '') + ')' for f in failed_clones)}",
             "repo_count": 0,
             "repos": [],
         }
 
-    if not path_obj.is_dir():
-        return {
-            "valid": False,
-            "error": f"'{path_obj}' is a file, not a directory.",
-            "repo_count": 0,
-            "repos": [],
-        }
-
-    # Discover git repositories
-    repos_found: list[dict[str, str]] = []
-    excluded = {
-        name.strip().lower()
-        for name in settings.excluded_repository_names.split(",")
-        if name.strip()
+    # Save github settings
+    to_save = {
+        "github_source_type": source_type,
+        "github_org_or_user": org_or_user,
+        "github_repo_urls": raw_urls,
     }
+    if token and "..." not in token:
+        to_save["github_token"] = token
+        to_save["github_org"] = org_or_user
 
-    # Check if directory itself is a git repository
-    if (path_obj / ".git").is_dir():
-        if path_obj.name.lower() not in excluded:
-            repos_found.append({"name": path_obj.name, "path": str(path_obj)})
-    else:
-        try:
-            for child in sorted(path_obj.iterdir()):
-                if child.is_dir() and (child / ".git").is_dir():
-                    if child.name.lower() not in excluded:
-                        repos_found.append({"name": child.name, "path": str(child)})
-        except PermissionError:
-            return {"valid": False, "error": f"Permission denied reading '{path_obj}'.", "repo_count": 0, "repos": []}
-
-    if not repos_found:
-        return {
-            "valid": True,
-            "repo_count": 0,
-            "repos": [],
-            "resolved_path": str(path_obj),
-            "message": f"Directory exists at '{path_obj}', but contains no Git repositories (no subfolders with '.git').",
-        }
+    if hasattr(_user, "id") and _user.id:
+        set_user_settings_bulk(settings, _user.id, _user.email, to_save)
+    set_settings_bulk(settings, to_save)
+    reload_settings()
 
     return {
         "valid": True,
-        "repo_count": len(repos_found),
-        "repos": [r["name"] for r in repos_found],
-        "resolved_path": str(path_obj),
-        "message": f"Successfully found {len(repos_found)} Git repository(ies) in '{path_obj}'.",
+        "repo_count": len(cloned_repos),
+        "repos": [r["name"] for r in cloned_repos],
+        "cloned_details": cloned_repos,
+        "failed_clones": failed_clones,
+        "message": f"Successfully connected and synced {len(cloned_repos)} repository(ies) from GitHub.",
     }
+
+
+
 
 
 

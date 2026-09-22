@@ -7,7 +7,10 @@ export default function SetupWizard({ onComplete }) {
 
   // Form State
   const [formData, setFormData] = useState({
-    repository_search_root: "",
+    github_source_type: "org", // 'org' or 'urls'
+    github_org_or_user: "",
+    github_repo_urls: "",
+    github_token: "",
     jira_base_url: "",
     jira_email: "",
     jira_api_token: "",
@@ -22,8 +25,10 @@ export default function SetupWizard({ onComplete }) {
     slack_channel_id: "",
   });
 
+  const [showToken, setShowToken] = useState(false);
+
   // Validation / Test States
-  const [repoValidation, setRepoValidation] = useState(null); // { valid, count, repos, message, error }
+  const [repoValidation, setRepoValidation] = useState(null); // { valid, repo_count, repos, cloned_details, message, error }
   const [validatingRepo, setValidatingRepo] = useState(false);
 
   const [jiraTestResult, setJiraTestResult] = useState(null); // { success, message, error, displayName }
@@ -39,20 +44,35 @@ export default function SetupWizard({ onComplete }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiFetch("/api/settings");
-        if (res) {
+        const [settingsRes, statusRes] = await Promise.all([
+          apiFetch("/api/settings").catch(() => null),
+          apiFetch("/api/settings/status").catch(() => null),
+        ]);
+
+        if (settingsRes) {
           setFormData((prev) => ({
             ...prev,
-            repository_search_root: res.repository_search_root || "",
-            jira_base_url: res.jira_base_url || "",
-            jira_email: res.jira_email || "",
-            jira_project_key: res.jira_project_key || "",
-            llm_provider: res.llm_provider || "groq",
-            llm_model: res.llm_model || "openai/gpt-oss-120b",
-            openai_base_url: res.openai_base_url || "",
-            anthropic_model: res.anthropic_model || "claude-3-5-sonnet-20241022",
-            slack_channel_id: res.slack_channel_id || "",
+            github_source_type: settingsRes.github_source_type || "org",
+            github_org_or_user: settingsRes.github_org_or_user || "",
+            github_repo_urls: settingsRes.github_repo_urls || "",
+            jira_base_url: settingsRes.jira_base_url || "",
+            jira_email: settingsRes.jira_email || "",
+            jira_project_key: settingsRes.jira_project_key || "",
+            llm_provider: settingsRes.llm_provider || "groq",
+            llm_model: settingsRes.llm_model || "openai/gpt-oss-120b",
+            openai_base_url: settingsRes.openai_base_url || "",
+            anthropic_model: settingsRes.anthropic_model || "claude-3-5-sonnet-20241022",
+            slack_channel_id: settingsRes.slack_channel_id || "",
           }));
+        }
+
+        if (statusRes && statusRes.repositories_count > 0) {
+          setRepoValidation({
+            valid: true,
+            repo_count: statusRes.repositories_count,
+            repos: statusRes.repositories || [],
+            message: `Found ${statusRes.repositories_count} repository(ies) ready in workspace.`,
+          });
         }
       } catch {
         /* Ignore if unconfigured */
@@ -76,7 +96,6 @@ export default function SetupWizard({ onComplete }) {
       defaultModel = "gpt-4o-mini";
       defaultBaseUrl = "";
     } else if (provider === "gemini") {
-      // Configured as OpenAI compatible endpoint
       provider = "openai";
       defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/";
       defaultModel = "gemini-2.5-flash";
@@ -95,14 +114,19 @@ export default function SetupWizard({ onComplete }) {
     setLlmTestResult(null);
   };
 
-  // 1. Validate Repo Path
-  async function handleValidateRepo() {
+  // 1. Validate & Sync GitHub Repositories
+  async function handleValidateGithub() {
     setValidatingRepo(true);
     setRepoValidation(null);
     try {
-      const res = await apiFetch("/api/settings/validate-repo-path", {
+      const res = await apiFetch("/api/settings/validate-github", {
         method: "POST",
-        body: { path: formData.repository_search_root || "." },
+        body: {
+          source_type: formData.github_source_type,
+          github_org_or_user: formData.github_org_or_user,
+          github_repo_urls: formData.github_repo_urls,
+          github_token: formData.github_token,
+        },
       });
       setRepoValidation(res);
     } catch (err) {
@@ -161,19 +185,6 @@ export default function SetupWizard({ onComplete }) {
     }
   }
 
-  // Dismiss Wizard
-  async function handleDismiss() {
-    try {
-      localStorage.setItem("jira_ai_setup_dismissed", "true");
-      await apiFetch("/api/settings/dismiss", { method: "POST" });
-    } catch {
-      /* ignore */
-    }
-    if (onComplete) {
-      onComplete();
-    }
-  }
-
   // 4. Save and Finish
   async function handleSaveAndFinish() {
     setSaving(true);
@@ -199,6 +210,8 @@ export default function SetupWizard({ onComplete }) {
     }
   }
 
+  const isStep1Valid = Boolean(repoValidation && repoValidation.valid && repoValidation.repo_count > 0);
+
   const isStep2Valid = Boolean(
     formData.jira_base_url.trim() &&
     formData.jira_email.trim() &&
@@ -214,6 +227,7 @@ export default function SetupWizard({ onComplete }) {
   })();
 
   const canContinue = (() => {
+    if (step === 1) return isStep1Valid;
     if (step === 2) return isStep2Valid;
     if (step === 3) return isStep3Valid;
     return true;
@@ -236,14 +250,14 @@ export default function SetupWizard({ onComplete }) {
             </div>
           </div>
           <p className="wizard-subtitle">
-            Configure your development workspace, Jira integration, and AI provider to unlock the AI Governor dashboard.
+            Configure your GitHub repositories, Jira integration, and AI provider to unlock the AI Governor dashboard.
           </p>
 
           {/* Stepper Indicator */}
           <div className="stepper-bar">
             <div className={`step-item ${step >= 1 ? "active" : ""} ${step > 1 ? "completed" : ""}`}>
               <div className="step-circle">{step > 1 ? "✓" : "1"}</div>
-              <span className="step-label">Repositories</span>
+              <span className="step-label">GitHub Repos</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 2 ? "active" : ""} ${step > 2 ? "completed" : ""}`}>
@@ -267,84 +281,173 @@ export default function SetupWizard({ onComplete }) {
         <div className="wizard-body">
           {saveError && <div className="callout callout-danger">{saveError}</div>}
 
-          {/* STEP 1: Git Repositories */}
+          {/* STEP 1: GitHub Repositories Integration */}
           {step === 1 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">📁</span>
+                <span className="step-icon">🐙</span>
                 <div>
-                  <h3 className="step-heading">Git Repositories Root Path</h3>
+                  <h3 className="step-heading">GitHub Repositories Integration</h3>
                   <p className="step-desc">
-                    Specify the local folder containing your Git codebases. Jira AI scans this directory to extract code symbols, build the knowledge graph, and perform automated root cause analysis.
+                    Connect your GitHub organization, user account, or specific repository URLs. Repositories are synchronized directly to the server workspace for Knowledge Graph construction, ticket tracing, and AI Root Cause Analysis.
                   </p>
                 </div>
               </div>
 
-              <div className="callout callout-info">
-                <strong>💡 Quick Tip:</strong> Enter the absolute directory path where your repositories reside (e.g. <code>C:\Users\YourName\Projects</code> on Windows or <code>/Users/name/projects</code> on Mac/Linux), or use <code>.</code> for current folder.
+              {/* Source Mode Toggle */}
+              <div className="github-mode-toggle">
+                <button
+                  type="button"
+                  className={`github-mode-btn ${formData.github_source_type === "org" ? "active" : ""}`}
+                  onClick={() => handleChange("github_source_type", "org")}
+                >
+                  🏢 GitHub Organization / User
+                </button>
+                <button
+                  type="button"
+                  className={`github-mode-btn ${formData.github_source_type === "urls" ? "active" : ""}`}
+                  onClick={() => handleChange("github_source_type", "urls")}
+                >
+                  🔗 Specific Repository URLs
+                </button>
               </div>
 
-              <div className="form-group" style={{ marginTop: "16px" }}>
-                <label className="field-label">
-                  Local Repository Directory Path <span className="req">*</span>
-                </label>
-                <div className="input-with-action">
+              {formData.github_source_type === "org" ? (
+                <div className="form-group">
+                  <label className="field-label">
+                    GitHub Organization or Username <span className="req">*</span>
+                  </label>
                   <input
                     type="text"
+                    name="gh_org_ident_custom"
+                    autoComplete="off"
+                    data-lpignore="true"
                     className="field-input"
-                    placeholder="e.g. C:\Users\Username\Projects or /home/dev/repos"
-                    value={formData.repository_search_root}
-                    onChange={(e) => handleChange("repository_search_root", e.target.value)}
+                    placeholder="e.g. AonamiTech or your-github-handle"
+                    value={formData.github_org_or_user}
+                    onChange={(e) => handleChange("github_org_or_user", e.target.value)}
+                  />
+                  <span className="field-hint">
+                    All public and authorized repositories under this account will be automatically discovered and synchronized.
+                  </span>
+                </div>
+              ) : (
+                <div className="form-group">
+                  <label className="field-label">
+                    GitHub Repository URLs or Slugs <span className="req">*</span>
+                  </label>
+                  <textarea
+                    name="gh_repos_list_custom"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    className="field-input"
+                    style={{ minHeight: "80px", resize: "vertical", marginTop: "4px" }}
+                    placeholder="e.g.&#10;https://github.com/AonamiTech/trail-main&#10;https://github.com/org/backend-service&#10;or org/repo"
+                    value={formData.github_repo_urls}
+                    onChange={(e) => handleChange("github_repo_urls", e.target.value)}
+                  />
+                  <span className="field-hint">
+                    Enter one or more GitHub repository URLs (one per line or comma-separated).
+                  </span>
+                </div>
+              )}
+
+              {/* Personal Access Token (PAT) Input */}
+              <div className="form-group" style={{ marginTop: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <label className="field-label" style={{ marginBottom: 0 }}>
+                    GitHub Personal Access Token (PAT) <span style={{ fontWeight: 400, color: "var(--muted)" }}>(Optional for public repos)</span>
+                  </label>
+                  <a
+                    href="https://github.com/settings/tokens"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650 }}
+                  >
+                    Generate GitHub Token ↗
+                  </a>
+                </div>
+                <div className="input-with-action" style={{ marginTop: "4px" }}>
+                  <input
+                    type={showToken ? "text" : "password"}
+                    name="gh_pat_token_secret"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    className="field-input"
+                    placeholder="ghp_... or github_pat_..."
+                    value={formData.github_token}
+                    onChange={(e) => handleChange("github_token", e.target.value)}
                   />
                   <button
                     type="button"
                     className="action-btn"
-                    onClick={handleValidateRepo}
-                    disabled={validatingRepo}
+                    onClick={() => setShowToken(!showToken)}
+                    style={{ minWidth: "70px" }}
                   >
-                    {validatingRepo ? "Scanning..." : "🔍 Scan & Validate"}
+                    {showToken ? "🙈 Hide" : "👁️ Show"}
                   </button>
                 </div>
+                <span className="field-hint">
+                  Required for <strong>private repositories</strong> and to prevent GitHub API rate limits. Token requires standard <code>repo</code> scope.
+                </span>
               </div>
 
-              {/* Scan Results */}
+              {/* Action Button */}
+              <div style={{ marginTop: "18px" }}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ width: "100%", minHeight: "42px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                  onClick={handleValidateGithub}
+                  disabled={
+                    validatingRepo ||
+                    (formData.github_source_type === "org"
+                      ? !formData.github_org_or_user.trim()
+                      : !formData.github_repo_urls.trim())
+                  }
+                >
+                  {validatingRepo ? "⚡ Connecting & Syncing Repositories from GitHub..." : "🔍 Authenticate & Sync Repositories"}
+                </button>
+              </div>
+
+              {/* Sync Results */}
               {repoValidation && (
                 <div
                   className={`validation-box ${
                     repoValidation.valid && repoValidation.repo_count > 0
                       ? "box-success"
-                      : repoValidation.valid
-                      ? "box-warning"
                       : "box-danger"
                   }`}
+                  style={{ marginTop: "16px" }}
                 >
                   {repoValidation.valid && repoValidation.repo_count > 0 ? (
                     <div>
-                      <div className="box-title">
-                        ✅ Discovered {repoValidation.repo_count} Git Repository(ies)
+                      <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        ✅ Successfully Connected & Synced {repoValidation.repo_count} Repository(ies)
                       </div>
-                      <div className="repo-tags-grid">
+                      <div className="box-sub" style={{ marginBottom: "8px" }}>
+                        {repoValidation.message || "All repositories are ready and available in the server workspace for graph analysis."}
+                      </div>
+                      <div className="github-repo-card-grid">
                         {repoValidation.repos.map((name) => (
-                          <span key={name} className="repo-tag">
-                            📦 {name}
-                          </span>
+                          <div key={name} className="github-repo-card">
+                            <div className="github-repo-card-head">
+                              <span className="github-repo-card-name" title={name}>📦 {name}</span>
+                            </div>
+                            <div className="github-repo-card-badges">
+                              <span className="github-badge-status">✓ Ready</span>
+                              <span className="github-badge-branch">main</span>
+                            </div>
+                          </div>
                         ))}
-                      </div>
-                      {repoValidation.resolved_path && (
-                        <div className="box-sub">Resolved Path: {repoValidation.resolved_path}</div>
-                      )}
-                    </div>
-                  ) : repoValidation.valid ? (
-                    <div>
-                      <div className="box-title">⚠️ Directory exists, but 0 Git repositories found</div>
-                      <div className="box-sub">
-                        {repoValidation.message || "Make sure the folder contains subfolders with git (.git) repositories."}
                       </div>
                     </div>
                   ) : (
                     <div>
-                      <div className="box-title">❌ Path Validation Failed</div>
-                      <div className="box-sub">{repoValidation.error}</div>
+                      <div className="box-title">❌ GitHub Connection / Sync Failed</div>
+                      <div className="box-sub">
+                        {repoValidation.error || "Unable to find or clone repositories from GitHub. Please check the organization name, repository URL, or provide a GitHub Personal Access Token."}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -399,6 +502,9 @@ export default function SetupWizard({ onComplete }) {
                   </label>
                   <input
                     type="email"
+                    name="jira_auth_user_email"
+                    autoComplete="off"
+                    data-lpignore="true"
                     className="field-input"
                     placeholder="name@company.com"
                     value={formData.jira_email}
@@ -414,6 +520,9 @@ export default function SetupWizard({ onComplete }) {
                 </label>
                 <input
                   type="password"
+                  name="jira_custom_api_secret"
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="field-input"
                   placeholder="Paste your Jira API Token (ATATT...)"
                   value={formData.jira_api_token}
@@ -567,6 +676,9 @@ export default function SetupWizard({ onComplete }) {
                         </label>
                         <input
                           type="password"
+                          name="ai_anthropic_secret_key"
+                          autoComplete="new-password"
+                          data-lpignore="true"
                           className="field-input"
                           placeholder="sk-ant-api03-..."
                           value={formData.anthropic_api_key}
@@ -577,6 +689,9 @@ export default function SetupWizard({ onComplete }) {
                         <label className="field-label">Anthropic Model</label>
                         <input
                           type="text"
+                          name="ai_anthropic_model_name"
+                          autoComplete="off"
+                          data-lpignore="true"
                           className="field-input"
                           placeholder="claude-3-5-sonnet-20241022"
                           value={formData.anthropic_model}
@@ -597,6 +712,9 @@ export default function SetupWizard({ onComplete }) {
                         </label>
                         <input
                           type="password"
+                          name="ai_generic_secret_key"
+                          autoComplete="new-password"
+                          data-lpignore="true"
                           className="field-input"
                           placeholder={
                             formData.llm_provider === "groq"
@@ -631,6 +749,9 @@ export default function SetupWizard({ onComplete }) {
                           <label className="field-label">Model Identifier</label>
                           <input
                             type="text"
+                            name="ai_generic_model_id"
+                            autoComplete="off"
+                            data-lpignore="true"
                             className="field-input"
                             value={formData.llm_model}
                             onChange={(e) => handleChange("llm_model", e.target.value)}
@@ -641,6 +762,9 @@ export default function SetupWizard({ onComplete }) {
                             <label className="field-label">API Base URL</label>
                             <input
                               type="text"
+                              name="ai_generic_base_url"
+                              autoComplete="off"
+                              data-lpignore="true"
                               className="field-input"
                               value={formData.openai_base_url}
                               onChange={(e) => handleChange("openai_base_url", e.target.value)}
@@ -707,9 +831,17 @@ export default function SetupWizard({ onComplete }) {
 
               <div className="summary-card">
                 <div className="summary-row">
-                  <span className="summary-label">📁 Repositories Path:</span>
+                  <span className="summary-label">🐙 GitHub Source:</span>
                   <span className="summary-value">
-                    {formData.repository_search_root || "Default (current workspace)"}
+                    {formData.github_source_type === "org"
+                      ? `Org / Account: ${formData.github_org_or_user || "Default"}`
+                      : `Specific URLs (${formData.github_repo_urls ? formData.github_repo_urls.split('\n').filter(Boolean).length : 0} repos)`}
+                  </span>
+                </div>
+                <div className="summary-row">
+                  <span className="summary-label">📦 Synced Repositories:</span>
+                  <span className="summary-value">
+                    {repoValidation?.repo_count || 0} repository(ies) active in workspace
                   </span>
                 </div>
                 <div className="summary-row">
@@ -736,6 +868,9 @@ export default function SetupWizard({ onComplete }) {
                     <label className="field-label">Slack Bot Token</label>
                     <input
                       type="password"
+                      name="slack_bot_token_field"
+                      autoComplete="new-password"
+                      data-lpignore="true"
                       className="field-input"
                       placeholder="xoxb-..."
                       value={formData.slack_bot_token}
@@ -746,6 +881,9 @@ export default function SetupWizard({ onComplete }) {
                     <label className="field-label">Slack Channel ID</label>
                     <input
                       type="text"
+                      name="slack_channel_id_field"
+                      autoComplete="off"
+                      data-lpignore="true"
                       className="field-input"
                       placeholder="C1234567890"
                       value={formData.slack_channel_id}
@@ -781,6 +919,7 @@ export default function SetupWizard({ onComplete }) {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {!canContinue && (
                 <span style={{ fontSize: "12px", color: "var(--danger, #f87171)", fontWeight: 600 }}>
+                  {step === 1 && "⚠️ Authenticate & sync at least 1 GitHub repository"}
                   {step === 2 && "⚠️ Fill Jira URL, Email, and Token to proceed"}
                   {step === 3 && `⚠️ Enter API Key for ${formData.llm_provider}`}
                 </span>

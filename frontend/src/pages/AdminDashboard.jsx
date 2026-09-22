@@ -15,6 +15,8 @@ import ChannelHealth from "../tabs/ChannelHealth.jsx";
 import Utilization from "../tabs/Utilization.jsx";
 import Neo4jGraph from "../tabs/Neo4jGraph.jsx";
 import RCA from "../tabs/RCA.jsx";
+import RingStudio from "../tabs/RingStudio.jsx";
+import ZohoTickets from "../tabs/ZohoTickets.jsx";
 
 // Tab registry — order matches the original UI. "docs" is intentionally absent:
 // the Documentation portal is a separate route, not a tab here.
@@ -29,6 +31,8 @@ const TABS = [
   { key: "utilization", label: "Utilization", Component: Utilization },
   { key: "neo4j", label: "Neo4j Graph", Component: Neo4jGraph },
   { key: "rca", label: "RCA", Component: RCA },
+  { key: "rings", label: "Ring Studio", Component: RingStudio },
+  { key: "zoho", label: "Zoho Tickets", Component: ZohoTickets },
 ];
 
 const TAB_SLUG_MAP = {
@@ -50,6 +54,10 @@ const TAB_SLUG_MAP = {
   neo4j: "neo4j",
   "neo4j-graph": "neo4j",
   rca: "rca",
+  rings: "rings",
+  "ring-studio": "rings",
+  zoho: "zoho",
+  "zoho-tickets": "zoho",
 };
 
 const TAB_TO_PATH = {
@@ -63,6 +71,8 @@ const TAB_TO_PATH = {
   utilization: "/dashboard/utilization",
   neo4j: "/dashboard/neo4j-graph",
   rca: "/dashboard/rca",
+  rings: "/dashboard/ring-studio",
+  zoho: "/dashboard/zoho-tickets",
 };
 
 const DEFAULT_OPTIONS = {

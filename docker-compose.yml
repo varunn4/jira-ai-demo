@@ -42,6 +42,7 @@ services:
       - "8000:8000"
 
     volumes:
+      - ./workspace/repos:/app/workspace/repos:rw
       - ${HOST_REPO_DIR:-.}:/host-repos:rw
       - ./repo_tree/workspace:/app/repo_tree/workspace:rw
       - ./ring_images:/app/app/static/rings/generated:rw
