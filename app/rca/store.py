@@ -32,6 +32,8 @@ class RCARun:
     run_id: str
     jira_key: str
     status: str = STATUS_QUEUED
+    user_id: Optional[int] = None
+    user_email: Optional[str] = None
     localized_repos: list[dict[str, Any]] = field(default_factory=list)
     candidates: list[dict[str, Any]] = field(default_factory=list)
     diagnosis: Optional[dict[str, Any]] = None
@@ -52,10 +54,11 @@ class RCARun:
 class RCARunStore:
     """Postgres-backed run store with a thread-safe in-memory live mirror."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, max_live: int = 50) -> None:
         self.settings = settings
         self._lock = threading.Lock()
         self._live: dict[str, RCARun] = {}
+        self._max_live = max_live
 
     # ── schema ────────────────────────────────────────────────────────────────
 
@@ -72,6 +75,8 @@ class RCARunStore:
                 """
                 CREATE TABLE IF NOT EXISTS rca_runs (
                     run_id          TEXT PRIMARY KEY,
+                    user_id         INTEGER,
+                    user_email      TEXT,
                     jira_key        TEXT,
                     status          TEXT NOT NULL,
                     localized_repos JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -86,6 +91,8 @@ class RCARunStore:
                 )
                 """
             )
+            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_email TEXT;")
             conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS jira_key TEXT;")
             conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS localized_repos JSONB NOT NULL DEFAULT '[]'::jsonb;")
             conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS candidates JSONB NOT NULL DEFAULT '[]'::jsonb;")
@@ -108,13 +115,23 @@ class RCARunStore:
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
-    def create(self, jira_key: str) -> RCARun:
+    def create(self, jira_key: str, user_id: Optional[int] = None, user_email: Optional[str] = None) -> RCARun:
         self.init_schema()
-        run = RCARun(run_id=str(uuid.uuid4()), jira_key=jira_key, status=STATUS_QUEUED)
+        run = RCARun(
+            run_id=str(uuid.uuid4()),
+            jira_key=jira_key,
+            status=STATUS_QUEUED,
+            user_id=user_id,
+            user_email=user_email,
+        )
         with self._lock:
             self._live[run.run_id] = run
+            if len(self._live) > self._max_live:
+                # Evict oldest live entry from in-memory dictionary to bound memory
+                oldest_key = min(self._live.keys(), key=lambda k: self._live[k].created_at)
+                self._live.pop(oldest_key, None)
         self._persist(run)
-        log.info("RCA run %s created for %s", run.run_id, jira_key)
+        log.info("RCA run %s created for %s (user_id=%s)", run.run_id, jira_key, user_id)
         return run
 
     def touch(self, run: RCARun, *, status: Optional[str] = None) -> None:
@@ -130,7 +147,6 @@ class RCARunStore:
         run.updated_at = datetime.now(timezone.utc)
         with self._lock:
             self._live[run.run_id] = run
-        # live-only; full trace persisted at finalize to bound write volume
 
     def get(self, run_id: str) -> Optional[RCARun]:
         with self._lock:
@@ -138,17 +154,26 @@ class RCARunStore:
                 return self._live[run_id]
         return self._load(run_id)
 
-    def list_recent(self, limit: int = 25) -> list[dict[str, Any]]:
+    def list_recent(self, limit: int = 25, user_id: Optional[int] = None, is_admin: bool = False) -> list[dict[str, Any]]:
         if not self.settings.database_url:
             with self._lock:
                 runs = sorted(self._live.values(), key=lambda r: r.created_at, reverse=True)
+                if not is_admin and user_id is not None:
+                    runs = [r for r in runs if r.user_id == user_id]
             return [self._summary(r) for r in runs[:limit]]
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT run_id, jira_key, status, confidence, created_at, updated_at "
-                "FROM rca_runs ORDER BY created_at DESC LIMIT %s",
-                (limit,),
-            ).fetchall()
+            if is_admin or user_id is None:
+                rows = conn.execute(
+                    "SELECT run_id, jira_key, status, confidence, created_at, updated_at "
+                    "FROM rca_runs ORDER BY created_at DESC LIMIT %s",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT run_id, jira_key, status, confidence, created_at, updated_at "
+                    "FROM rca_runs WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+                    (user_id, limit),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     # ── persistence ───────────────────────────────────────────────────────────
@@ -159,10 +184,10 @@ class RCARunStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO rca_runs (run_id, jira_key, status, localized_repos,
+                INSERT INTO rca_runs (run_id, user_id, user_email, jira_key, status, localized_repos,
                     candidates, diagnosis, confidence, agent_trace, document, error,
                     created_at, updated_at)
-                VALUES (%(run_id)s, %(jira_key)s, %(status)s, %(localized_repos)s::jsonb,
+                VALUES (%(run_id)s, %(user_id)s, %(user_email)s, %(jira_key)s, %(status)s, %(localized_repos)s::jsonb,
                     %(candidates)s::jsonb, %(diagnosis)s::jsonb, %(confidence)s,
                     %(agent_trace)s::jsonb, %(document)s::jsonb, %(error)s, %(created_at)s,
                     %(updated_at)s)
@@ -178,7 +203,8 @@ class RCARunStore:
                     updated_at = EXCLUDED.updated_at
                 """,
                 {
-                    "run_id": run.run_id, "jira_key": run.jira_key, "status": run.status,
+                    "run_id": run.run_id, "user_id": run.user_id, "user_email": run.user_email,
+                    "jira_key": run.jira_key, "status": run.status,
                     "localized_repos": json.dumps(run.localized_repos),
                     "candidates": json.dumps(run.candidates),
                     "diagnosis": json.dumps(run.diagnosis) if run.diagnosis else None,

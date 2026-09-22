@@ -41,9 +41,13 @@ def rca_start(
     key = jira_key.strip().upper()
     if not re.match(r"^[A-Z][A-Z0-9]+-\d+$", key):
         raise HTTPException(status_code=400, detail=f"Invalid Jira key: {jira_key!r}")
-    run = rca_run_store.create(key)
+    run = rca_run_store.create(
+        key,
+        user_id=getattr(_user, "id", None),
+        user_email=getattr(_user, "email", None),
+    )
     background_tasks.add_task(_run_rca_pipeline, run.run_id)
-    log.info("Enqueued RCA run %s for %s", run.run_id, key)
+    log.info("Enqueued RCA run %s for %s by %s", run.run_id, key, getattr(_user, "email", "unknown"))
     return {"run_id": run.run_id, "jira_key": key, "status": run.status}
 
 
@@ -52,7 +56,14 @@ def rca_list_runs(
     limit: int = 25,
     _user: CurrentUser = Depends(require_tab("rca")),
 ) -> dict[str, Any]:
-    return {"runs": rca_run_store.list_recent(limit=limit)}
+    is_admin = _user.is_service or _user.role == "admin"
+    return {
+        "runs": rca_run_store.list_recent(
+            limit=limit,
+            user_id=getattr(_user, "id", None),
+            is_admin=is_admin,
+        )
+    }
 
 
 @router.get("/rca/runs/{run_id}")

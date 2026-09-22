@@ -136,16 +136,42 @@ class CustomerTicketsResponse(BaseModel):
 
 
 class ZohoClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, overrides: Optional[dict[str, Any]] = None) -> None:
         self.settings = settings
+        self._overrides = overrides or {}
         self._token: Optional[str] = None
         self._token_expiry: float = 0.0
         self._lock = threading.Lock()
 
+    @property
+    def client_id(self) -> str:
+        return (self._overrides.get("zoho_client_id") or self.settings.zoho_client_id or "").strip()
+
+    @property
+    def client_secret(self) -> str:
+        return (self._overrides.get("zoho_client_secret") or self.settings.zoho_client_secret or "").strip()
+
+    @property
+    def refresh_token(self) -> str:
+        return (self._overrides.get("zoho_refresh_token") or self.settings.zoho_refresh_token or "").strip()
+
+    @property
+    def org_id(self) -> str:
+        return (self._overrides.get("zoho_org_id") or self.settings.zoho_org_id or "").strip()
+
+    @property
+    def accounts_base(self) -> str:
+        base = (self._overrides.get("zoho_accounts_base") or self.settings.zoho_accounts_base or "https://accounts.zoho.in").strip().rstrip("/")
+        return base or "https://accounts.zoho.in"
+
+    @property
+    def desk_base(self) -> str:
+        base = (self._overrides.get("zoho_desk_base") or self.settings.zoho_desk_base or "https://desk.zoho.in").strip().rstrip("/")
+        return base or "https://desk.zoho.in"
+
     # ── Configuration ────────────────────────────────────────────────────────
     def is_configured(self) -> bool:
-        s = self.settings
-        return bool(s.zoho_client_id and s.zoho_client_secret and s.zoho_refresh_token and s.zoho_org_id)
+        return bool(self.client_id and self.client_secret and self.refresh_token and self.org_id)
 
     # ── OAuth ────────────────────────────────────────────────────────────────
     def _access_token(self) -> str:
@@ -154,14 +180,16 @@ class ZohoClient:
             if self._token and time.time() < self._token_expiry - _TOKEN_SKEW_SECONDS:
                 return self._token
 
-            s = self.settings
+            if not self.is_configured():
+                raise ZohoError("Zoho Desk credentials (Client ID, Secret, Refresh Token, Org ID) are not configured.")
+
             log.info("Refreshing Zoho access token")
             resp = requests.post(
-                f"{s.zoho_accounts_base}/oauth/v2/token",
+                f"{self.accounts_base}/oauth/v2/token",
                 params={
-                    "refresh_token": s.zoho_refresh_token,
-                    "client_id": s.zoho_client_id,
-                    "client_secret": s.zoho_client_secret,
+                    "refresh_token": self.refresh_token,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
                     "grant_type": "refresh_token",
                 },
                 timeout=self.settings.external_request_timeout_seconds,
@@ -180,11 +208,11 @@ class ZohoClient:
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Zoho-oauthtoken {self._access_token()}",
-            "orgId": self.settings.zoho_org_id,
+            "orgId": self.org_id,
         }
 
     def _get(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        url = f"{self.settings.zoho_desk_base}{path}"
+        url = f"{self.desk_base}{path}"
         resp = requests.get(
             url,
             headers=self._headers(),

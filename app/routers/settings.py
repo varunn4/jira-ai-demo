@@ -99,22 +99,24 @@ def dismiss_setup_wizard(_user: CurrentUser = Depends(require_tab("repos"))) -> 
 def get_settings_view(_user: CurrentUser = Depends(require_tab("repos"))) -> dict[str, Any]:
     """Return all configurable settings with masked secrets for the authenticated user."""
     reload_settings()
-    db_items = get_all_user_settings(settings, user_id=getattr(_user, "id", None), user_email=getattr(_user, "email", None))
+    user_id = getattr(_user, "id", None)
+    db_items = get_all_user_settings(settings, user_id=user_id, user_email=getattr(_user, "email", None))
 
+    # User-specific credentials and repo configs should only come from user's own saved settings
     return {
         "github_source_type": db_items.get("github_source_type", "org"),
-        "github_org_or_user": db_items.get("github_org_or_user", getattr(settings, "github_org", "")),
+        "github_org_or_user": db_items.get("github_org_or_user", ""),
         "github_repo_urls": db_items.get("github_repo_urls", ""),
-        "github_token_masked": _mask_secret(db_items.get("github_token", getattr(settings, "github_token", ""))),
-        "github_has_token": bool(db_items.get("github_token", getattr(settings, "github_token", ""))),
+        "github_token_masked": _mask_secret(db_items.get("github_token", "")),
+        "github_has_token": bool(db_items.get("github_token", "")),
         "repository_search_root": db_items.get("repository_search_root", getattr(settings, "repository_search_root", ".")),
         "excluded_repository_names": db_items.get("excluded_repository_names", getattr(settings, "excluded_repository_names", "JIRA-AI")),
-        "jira_base_url": db_items.get("jira_base_url", getattr(settings, "jira_base_url", "")),
-        "jira_email": db_items.get("jira_email", getattr(settings, "jira_email", "")),
-        "jira_api_token_masked": _mask_secret(db_items.get("jira_api_token", getattr(settings, "jira_api_token", ""))),
-        "jira_has_token": bool(db_items.get("jira_api_token", getattr(settings, "jira_api_token", ""))),
-        "jira_project_key": db_items.get("jira_project_key", db_items.get("jira_project_keys", getattr(settings, "jira_project_keys", ""))),
-        "jira_excluded_project_keys": db_items.get("jira_excluded_project_keys", getattr(settings, "jira_excluded_project_keys", "")),
+        "jira_base_url": db_items.get("jira_base_url", ""),
+        "jira_email": db_items.get("jira_email", ""),
+        "jira_api_token_masked": _mask_secret(db_items.get("jira_api_token", "")),
+        "jira_has_token": bool(db_items.get("jira_api_token", "")),
+        "jira_project_key": db_items.get("jira_project_key", db_items.get("jira_project_keys", "")),
+        "jira_excluded_project_keys": db_items.get("jira_excluded_project_keys", ""),
         "llm_provider": db_items.get("llm_provider", getattr(settings, "llm_provider", "anthropic")),
         "llm_model": db_items.get("llm_model", getattr(settings, "llm_model", "claude-sonnet-4-6")),
         "openai_base_url": db_items.get("openai_base_url", getattr(settings, "openai_base_url", "")),
@@ -130,6 +132,14 @@ def get_settings_view(_user: CurrentUser = Depends(require_tab("repos"))) -> dic
         "n8n_base_url": db_items.get("n8n_base_url", getattr(settings, "n8n_base_url", "")),
         "n8n_api_key_masked": _mask_secret(db_items.get("n8n_api_key", getattr(settings, "n8n_api_key", ""))),
         "n8n_has_key": bool(db_items.get("n8n_api_key", getattr(settings, "n8n_api_key", ""))),
+        "zoho_client_id": db_items.get("zoho_client_id", getattr(settings, "zoho_client_id", "")),
+        "zoho_client_secret_masked": _mask_secret(db_items.get("zoho_client_secret", getattr(settings, "zoho_client_secret", ""))),
+        "zoho_has_client_secret": bool(db_items.get("zoho_client_secret", getattr(settings, "zoho_client_secret", ""))),
+        "zoho_refresh_token_masked": _mask_secret(db_items.get("zoho_refresh_token", getattr(settings, "zoho_refresh_token", ""))),
+        "zoho_has_refresh_token": bool(db_items.get("zoho_refresh_token", getattr(settings, "zoho_refresh_token", ""))),
+        "zoho_org_id": db_items.get("zoho_org_id", getattr(settings, "zoho_org_id", "")),
+        "zoho_accounts_base": db_items.get("zoho_accounts_base", getattr(settings, "zoho_accounts_base", "https://accounts.zoho.in")),
+        "zoho_desk_base": db_items.get("zoho_desk_base", getattr(settings, "zoho_desk_base", "https://desk.zoho.in")),
     }
 
 
@@ -171,6 +181,12 @@ def save_settings(
         "ollama_url",
         "n8n_base_url",
         "n8n_api_key",
+        "zoho_client_id",
+        "zoho_client_secret",
+        "zoho_refresh_token",
+        "zoho_org_id",
+        "zoho_accounts_base",
+        "zoho_desk_base",
     }
 
     for k, v in payload.items():
@@ -231,7 +247,14 @@ def validate_github_integration(
         if source_type == "org":
             if not org_or_user:
                 return {"valid": False, "error": "GitHub Organization or Username is required.", "repo_count": 0, "repos": []}
-            discovered_meta = fetch_github_org_repos(org_or_user, token=token)
+            
+            # Smart detection: if user entered a full repository URL or owner/repo slug into org input, handle as single repo
+            slug = parse_github_repo_slug(org_or_user)
+            if slug and ("github.com" in org_or_user or "/" in org_or_user.strip("/")):
+                discovered_meta = [fetch_single_github_repo(org_or_user, token=token)]
+            else:
+                discovered_meta = fetch_github_org_repos(org_or_user, token=token)
+
             if not discovered_meta:
                 return {"valid": False, "error": f"No repositories found under GitHub organization/user '{org_or_user}'.", "repo_count": 0, "repos": []}
         else:
@@ -436,4 +459,83 @@ def test_n8n_connection(
         return {"success": False, "error": f"Connection timed out connecting to n8n at {base_url}."}
     except Exception as exc:
         return {"success": False, "error": f"Failed to reach n8n: {exc}"}
+
+
+@router.post("/test-zoho")
+def test_zoho_connection(
+    payload: dict[str, Any],
+    _user: CurrentUser = Depends(require_tab("repos")),
+) -> dict[str, Any]:
+    """Test Zoho Desk OAuth token refresh and organization connection with provided credentials."""
+    user_id = getattr(_user, "id", None)
+    user_email = getattr(_user, "email", None)
+    db_items = get_all_user_settings(settings, user_id=user_id, user_email=user_email)
+
+    client_id = (payload.get("zoho_client_id") or db_items.get("zoho_client_id") or settings.zoho_client_id or "").strip()
+
+    client_secret = (payload.get("zoho_client_secret") or "").strip()
+    if not client_secret or "..." in client_secret:
+        client_secret = (db_items.get("zoho_client_secret") or settings.zoho_client_secret or "").strip()
+
+    refresh_token = (payload.get("zoho_refresh_token") or "").strip()
+    if not refresh_token or "..." in refresh_token:
+        refresh_token = (db_items.get("zoho_refresh_token") or settings.zoho_refresh_token or "").strip()
+
+    org_id = (payload.get("zoho_org_id") or db_items.get("zoho_org_id") or settings.zoho_org_id or "").strip()
+    accounts_base = (payload.get("zoho_accounts_base") or db_items.get("zoho_accounts_base") or settings.zoho_accounts_base or "https://accounts.zoho.in").strip().rstrip("/")
+    desk_base = (payload.get("zoho_desk_base") or db_items.get("zoho_desk_base") or settings.zoho_desk_base or "https://desk.zoho.in").strip().rstrip("/")
+
+    if not client_id:
+        return {"success": False, "error": "Zoho Client ID is required."}
+    if not client_secret:
+        return {"success": False, "error": "Zoho Client Secret is required."}
+    if not refresh_token:
+        return {"success": False, "error": "Zoho Refresh Token is required."}
+    if not org_id:
+        return {"success": False, "error": "Zoho Org ID is required."}
+
+    # Step 1: Test OAuth token refresh
+    try:
+        resp = requests.post(
+            f"{accounts_base}/oauth/v2/token",
+            params={
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "refresh_token",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return {"success": False, "error": f"OAuth token refresh failed (HTTP {resp.status_code}): {resp.text[:250]}"}
+
+        data = resp.json()
+        access_token = data.get("access_token")
+        if not access_token:
+            err_msg = data.get("error") or data.get("message") or str(data)
+            return {"success": False, "error": f"Zoho returned error during token refresh: {err_msg}"}
+
+        # Step 2: Test API call with access token to verify Org ID and Desk permissions
+        # Try contact search with limit 1 as verified check for Desk.search.READ / Desk.contacts.READ
+        search_resp = requests.get(
+            f"{desk_base}/api/v1/contacts/search",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}", "orgId": org_id},
+            params={"limit": 1},
+            timeout=10,
+        )
+        if search_resp.status_code not in (200, 204):
+            return {
+                "success": False,
+                "error": f"Zoho Desk API check failed for Org ID '{org_id}' (HTTP {search_resp.status_code}): {search_resp.text[:250]}",
+            }
+
+        return {
+            "success": True,
+            "message": f"Successfully authenticated with Zoho Desk! (Org ID: {org_id})",
+            "org_id": org_id,
+        }
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": f"Connection timed out reaching Zoho accounts ({accounts_base}) or Desk ({desk_base})."}
+    except Exception as exc:
+        return {"success": False, "error": f"Zoho validation failed: {exc}"}
 

@@ -16,6 +16,7 @@ from fastapi import (
 )
 
 from app import ring_studio
+from app.app_settings import get_all_user_settings
 from app.auth import CurrentUser, require_tab
 from app.config import settings
 from app.zoho_client import (
@@ -30,7 +31,12 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Plugins & Integrations"])
 
-zoho_client = ZohoClient(settings)
+
+def get_user_zoho_client(user: CurrentUser) -> ZohoClient:
+    user_id = getattr(user, "id", None)
+    user_email = getattr(user, "email", None)
+    user_settings = get_all_user_settings(settings, user_id=user_id, user_email=user_email)
+    return ZohoClient(settings, overrides=user_settings)
 
 
 # ─── Ring Studio (diamond-ring image-prompt generator) ───────────────────────
@@ -219,7 +225,13 @@ def ring_studio_gallery(
     job store. Returns an empty list with a message when the DB is unavailable —
     the Gallery is a nice-to-have and must never 500 the tab."""
     try:
-        entries = ring_studio.list_generations(settings, limit=limit)
+        is_admin = _user.is_service or _user.role == "admin"
+        entries = ring_studio.list_generations(
+            settings,
+            limit=limit,
+            user_id=getattr(_user, "id", None),
+            is_admin=is_admin,
+        )
         return {"count": len(entries), "entries": [e.model_dump() for e in entries]}
     except Exception as exc:  # noqa: BLE001 - degrade, don't break the tab
         log.warning("Ring gallery unavailable: %s", exc)
@@ -235,7 +247,8 @@ def zoho_status(
     _user: CurrentUser = Depends(require_tab("zoho")),
 ) -> dict[str, Any]:
     """Whether Zoho Desk credentials are configured (drives the tab's banner)."""
-    return {"configured": zoho_client.is_configured()}
+    client = get_user_zoho_client(_user)
+    return {"configured": client.is_configured()}
 
 
 @router.post("/zoho/tickets", response_model=CustomerTicketsResponse)
@@ -248,8 +261,9 @@ def zoho_customer_tickets(
     phone = (request.phone or "").strip() or None
     if not (email or phone):
         raise HTTPException(status_code=400, detail="Provide a customer email or phone number.")
+    client = get_user_zoho_client(_user)
     try:
-        return zoho_client.customer_tickets(email=email, phone=phone)
+        return client.customer_tickets(email=email, phone=phone)
     except ZohoError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -260,7 +274,8 @@ def zoho_ticket_detail(
     _user: CurrentUser = Depends(require_tab("zoho")),
 ) -> TicketDetailResponse:
     """One ticket's detail and conversation threads (the row-click detail view)."""
+    client = get_user_zoho_client(_user)
     try:
-        return zoho_client.ticket_detail(ticket_id)
+        return client.ticket_detail(ticket_id)
     except ZohoError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

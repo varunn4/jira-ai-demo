@@ -32,6 +32,12 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     ollama_url: "",
     n8n_base_url: "",
     n8n_api_key: "",
+    zoho_client_id: "",
+    zoho_client_secret: "",
+    zoho_refresh_token: "",
+    zoho_org_id: "",
+    zoho_accounts_base: "https://accounts.zoho.in",
+    zoho_desk_base: "https://desk.zoho.in",
   });
 
   // Masked flags
@@ -41,6 +47,8 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     openai_has_key: false,
     anthropic_has_key: false,
     n8n_has_key: false,
+    zoho_has_client_secret: false,
+    zoho_has_refresh_token: false,
   });
 
   // Track if user explicitly clicked "Change/Replace" for secret fields
@@ -51,6 +59,8 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     anthropic_api_key: false,
     slack_bot_token: false,
     n8n_api_key: false,
+    zoho_client_secret: false,
+    zoho_refresh_token: false,
   });
 
   // Validation/Test results
@@ -65,6 +75,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
   const [n8nTestResult, setN8nTestResult] = useState(null);
   const [testingN8n, setTestingN8n] = useState(false);
+
+  const [zohoTestResult, setZohoTestResult] = useState(null);
+  const [testingZoho, setTestingZoho] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -110,6 +123,12 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           ollama_url: data.ollama_url || "",
           n8n_base_url: data.n8n_base_url || "",
           n8n_api_key: "",
+          zoho_client_id: data.zoho_client_id || "",
+          zoho_client_secret: "",
+          zoho_refresh_token: "",
+          zoho_org_id: data.zoho_org_id || "",
+          zoho_accounts_base: data.zoho_accounts_base || "https://accounts.zoho.in",
+          zoho_desk_base: data.zoho_desk_base || "https://desk.zoho.in",
         });
 
         setMeta({
@@ -118,6 +137,8 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           openai_has_key: data.openai_has_key,
           anthropic_has_key: data.anthropic_has_key,
           n8n_has_key: data.n8n_has_key,
+          zoho_has_client_secret: data.zoho_has_client_secret,
+          zoho_has_refresh_token: data.zoho_has_refresh_token,
         });
 
         setEditSecrets({
@@ -127,6 +148,8 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           anthropic_api_key: !data.anthropic_has_key,
           slack_bot_token: !data.slack_bot_token_masked,
           n8n_api_key: !data.n8n_has_key,
+          zoho_client_secret: !data.zoho_has_client_secret,
+          zoho_refresh_token: !data.zoho_has_refresh_token,
         });
       }
 
@@ -274,6 +297,29 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     }
   }
 
+  async function handleTestZoho() {
+    setTestingZoho(true);
+    setZohoTestResult(null);
+    try {
+      const res = await apiFetch("/api/settings/test-zoho", {
+        method: "POST",
+        body: {
+          zoho_client_id: formData.zoho_client_id,
+          zoho_client_secret: formData.zoho_client_secret,
+          zoho_refresh_token: formData.zoho_refresh_token,
+          zoho_org_id: formData.zoho_org_id,
+          zoho_accounts_base: formData.zoho_accounts_base,
+          zoho_desk_base: formData.zoho_desk_base,
+        },
+      });
+      setZohoTestResult(res);
+    } catch (err) {
+      setZohoTestResult({ success: false, error: err.message });
+    } finally {
+      setTestingZoho(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveSuccess("");
@@ -287,6 +333,8 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     if (!editSecrets.anthropic_api_key && !formData.anthropic_api_key) delete payload.anthropic_api_key;
     if (!editSecrets.slack_bot_token && !formData.slack_bot_token) delete payload.slack_bot_token;
     if (!editSecrets.n8n_api_key && !formData.n8n_api_key) delete payload.n8n_api_key;
+    if (!editSecrets.zoho_client_secret && !formData.zoho_client_secret) delete payload.zoho_client_secret;
+    if (!editSecrets.zoho_refresh_token && !formData.zoho_refresh_token) delete payload.zoho_refresh_token;
 
     try {
       await apiFetch("/api/settings", {
@@ -333,6 +381,12 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
             onClick={() => setActiveTab("jira")}
           >
             🎫 Jira Cloud
+          </button>
+          <button
+            className={`modal-tab-btn ${activeTab === "zoho" ? "active" : ""}`}
+            onClick={() => setActiveTab("zoho")}
+          >
+            🎟️ Zoho Desk
           </button>
           <button
             className={`modal-tab-btn ${activeTab === "llm" ? "active" : ""}`}
@@ -646,6 +700,183 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         <div>
                           <div className="box-title">❌ Jira Connection Failed</div>
                           <div className="box-sub">{jiraTestResult.error}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB: Zoho Desk */}
+              {activeTab === "zoho" && (
+                <div className="settings-section">
+                  <div className="callout callout-info">
+                    <strong>🎟️ Zoho Desk OAuth 2.0 Integration:</strong> Connect to Zoho Desk to look up customer tickets, conversations, and statuses directly within the platform.
+                    <div style={{ marginTop: "6px", fontSize: "12px" }}>
+                      Create a Self Client in{" "}
+                      <a
+                        href="https://api-console.zoho.in"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="link-highlight"
+                      >
+                        Zoho API Console (India) ↗
+                      </a>{" "}
+                      or{" "}
+                      <a
+                        href="https://api-console.zoho.com"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="link-highlight"
+                      >
+                        Global Console (.com) ↗
+                      </a>{" "}
+                      with scopes: <code>Desk.tickets.READ,Desk.contacts.READ,Desk.search.READ</code>
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2" style={{ marginTop: "14px" }}>
+                    <div className="form-group">
+                      <label className="field-label">Zoho Client ID</label>
+                      <input
+                        type="text"
+                        name="settings_zoho_client_id"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        className="field-input"
+                        placeholder="1000.XXXXXXXXXXXXXXXXXXXXXXXXXX"
+                        value={formData.zoho_client_id}
+                        onChange={(e) => handleChange("zoho_client_id", e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="field-label">Zoho Org ID (Portal / Organization ID)</label>
+                      <input
+                        type="text"
+                        name="settings_zoho_org_id"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        className="field-input"
+                        placeholder="e.g. 60021345678"
+                        value={formData.zoho_org_id}
+                        onChange={(e) => handleChange("zoho_org_id", e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="form-group">
+                      <label className="field-label">Zoho Client Secret</label>
+                      {meta.zoho_has_client_secret && !editSecrets.zoho_client_secret ? (
+                        <div className="secret-saved-row">
+                          <span className="secret-indicator">🔒 Secret configured in database (Masked)</span>
+                          <button
+                            type="button"
+                            className="btn-text-action"
+                            onClick={() => setEditSecrets((p) => ({ ...p, zoho_client_secret: true }))}
+                          >
+                            Change Secret
+                          </button>
+                        </div>
+                      ) : (
+                        <input
+                          type="password"
+                          name="settings_zoho_client_secret_field"
+                          autoComplete="new-password"
+                          data-lpignore="true"
+                          className="field-input"
+                          placeholder="Enter Zoho Client Secret..."
+                          value={formData.zoho_client_secret}
+                          onChange={(e) => handleChange("zoho_client_secret", e.target.value)}
+                        />
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label className="field-label">Zoho Refresh Token</label>
+                      {meta.zoho_has_refresh_token && !editSecrets.zoho_refresh_token ? (
+                        <div className="secret-saved-row">
+                          <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
+                          <button
+                            type="button"
+                            className="btn-text-action"
+                            onClick={() => setEditSecrets((p) => ({ ...p, zoho_refresh_token: true }))}
+                          >
+                            Change Token
+                          </button>
+                        </div>
+                      ) : (
+                        <input
+                          type="password"
+                          name="settings_zoho_refresh_token_field"
+                          autoComplete="new-password"
+                          data-lpignore="true"
+                          className="field-input"
+                          placeholder="1000.xxxxxxxxxxxxxxxxxxxxxxxx..."
+                          value={formData.zoho_refresh_token}
+                          onChange={(e) => handleChange("zoho_refresh_token", e.target.value)}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="form-group">
+                      <label className="field-label">Zoho Accounts Base URL</label>
+                      <input
+                        type="text"
+                        name="settings_zoho_accounts_base"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        className="field-input"
+                        placeholder="https://accounts.zoho.in (or .com / .eu)"
+                        value={formData.zoho_accounts_base}
+                        onChange={(e) => handleChange("zoho_accounts_base", e.target.value)}
+                      />
+                      <span className="field-hint">Default: https://accounts.zoho.in</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="field-label">Zoho Desk Base URL</label>
+                      <input
+                        type="text"
+                        name="settings_zoho_desk_base"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        className="field-input"
+                        placeholder="https://desk.zoho.in (or .com / .eu)"
+                        value={formData.zoho_desk_base}
+                        onChange={(e) => handleChange("zoho_desk_base", e.target.value)}
+                      />
+                      <span className="field-hint">Default: https://desk.zoho.in</span>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "12px" }}>
+                    <button
+                      type="button"
+                      className="action-btn"
+                      onClick={handleTestZoho}
+                      disabled={testingZoho}
+                    >
+                      {testingZoho ? "Testing Zoho..." : "⚡ Test Zoho Desk Connection"}
+                    </button>
+                  </div>
+
+                  {zohoTestResult && (
+                    <div
+                      className={`validation-box ${zohoTestResult.success ? "box-success" : "box-danger"}`}
+                      style={{ marginTop: "12px" }}
+                    >
+                      {zohoTestResult.success ? (
+                        <div>
+                          <div className="box-title">✅ Zoho Desk Connected Successfully</div>
+                          <div className="box-sub">{zohoTestResult.message}</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="box-title">❌ Zoho Desk Connection Failed</div>
+                          <div className="box-sub">{zohoTestResult.error}</div>
                         </div>
                       )}
                     </div>

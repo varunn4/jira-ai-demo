@@ -23,6 +23,7 @@ function priorityClass(priority) {
 
 export default function ZohoTickets() {
   const [configured, setConfigured] = useState(null); // null = unknown yet
+  const [showConfigModal, setShowConfigModal] = useState(false);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,11 +31,15 @@ export default function ZohoTickets() {
   const [result, setResult] = useState(null); // { configured, contact, tickets, message }
   const [openTicket, setOpenTicket] = useState(null); // row clicked → detail modal
 
-  // Probe configuration once so we can warn before the operator wastes a lookup.
-  useEffect(() => {
+  const checkStatus = () => {
     apiFetch("/zoho/status")
       .then((d) => setConfigured(!!d.configured))
       .catch(() => setConfigured(false));
+  };
+
+  // Probe configuration once so we can warn before the operator wastes a lookup.
+  useEffect(() => {
+    checkStatus();
   }, []);
 
   const fetchTickets = async (e) => {
@@ -64,19 +69,49 @@ export default function ZohoTickets() {
 
   return (
     <div className="zoho-tab">
-      <header className="zoho-hero">
-        <h2>🎫 Zoho Tickets</h2>
-        <p className="muted">
-          Enter a customer's email or phone number to look them up in Zoho Desk
-          and view their support tickets and current statuses.
-        </p>
+      <header className="zoho-hero" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
+            <h2 style={{ margin: 0 }}>🎫 Zoho Tickets</h2>
+            {configured === true && (
+              <span className="badge ok" style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px" }}>
+                ✓ Connected
+              </span>
+            )}
+            {configured === false && (
+              <span className="badge warn" style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px" }}>
+                ⚠️ Not Configured
+              </span>
+            )}
+          </div>
+          <p className="muted" style={{ margin: 0, maxWidth: "600px" }}>
+            Enter a customer's email or phone number to look them up in Zoho Desk and view their support tickets and current statuses.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="action-btn"
+          onClick={() => setShowConfigModal(true)}
+          style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 600, padding: "7px 14px" }}
+        >
+          ⚙️ Configure Credentials
+        </button>
       </header>
 
       {configured === false && (
-        <div className="error-banner">
-          Zoho Desk is not configured. Set <code>ZOHO_CLIENT_ID</code>,{" "}
-          <code>ZOHO_CLIENT_SECRET</code>, <code>ZOHO_REFRESH_TOKEN</code> and{" "}
-          <code>ZOHO_ORG_ID</code> in the server environment.
+        <div className="error-banner" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginTop: "12px" }}>
+          <div>
+            <strong>Zoho Desk is not configured:</strong> Please configure your Zoho OAuth Client ID, Secret, Refresh Token, and Org ID.
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ fontSize: "12px", padding: "4px 12px", minHeight: "30px" }}
+            onClick={() => setShowConfigModal(true)}
+          >
+            ⚙️ Configure Now
+          </button>
         </div>
       )}
 
@@ -176,6 +211,412 @@ export default function ZohoTickets() {
       {openTicket && (
         <TicketDetailModal ticket={openTicket} onClose={() => setOpenTicket(null)} />
       )}
+
+      {showConfigModal && (
+        <ZohoConfigModal
+          onClose={() => setShowConfigModal(false)}
+          onSaved={() => {
+            checkStatus();
+            setShowConfigModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Configuration Modal directly in Zoho tab for quick setup and testing
+function ZohoConfigModal({ onClose, onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState("");
+  const [saveError, setSaveError] = useState("");
+
+  const [formData, setFormData] = useState({
+    zoho_client_id: "",
+    zoho_client_secret: "",
+    zoho_refresh_token: "",
+    zoho_org_id: "",
+    zoho_accounts_base: "https://accounts.zoho.in",
+    zoho_desk_base: "https://desk.zoho.in",
+  });
+
+  const [meta, setMeta] = useState({
+    zoho_has_client_secret: false,
+    zoho_has_refresh_token: false,
+  });
+
+  const [editSecrets, setEditSecrets] = useState({
+    zoho_client_secret: false,
+    zoho_refresh_token: false,
+  });
+
+  const [testResult, setTestResult] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    apiFetch("/api/settings")
+      .then((data) => {
+        if (!alive || !data) return;
+        setFormData({
+          zoho_client_id: data.zoho_client_id || "",
+          zoho_client_secret: "",
+          zoho_refresh_token: "",
+          zoho_org_id: data.zoho_org_id || "",
+          zoho_accounts_base: data.zoho_accounts_base || "https://accounts.zoho.in",
+          zoho_desk_base: data.zoho_desk_base || "https://desk.zoho.in",
+        });
+        setMeta({
+          zoho_has_client_secret: data.zoho_has_client_secret,
+          zoho_has_refresh_token: data.zoho_has_refresh_token,
+        });
+        setEditSecrets({
+          zoho_client_secret: !data.zoho_has_client_secret,
+          zoho_refresh_token: !data.zoho_has_refresh_token,
+        });
+      })
+      .catch((err) => setSaveError(`Failed to load settings: ${err.message}`))
+      .finally(() => alive && setLoading(false));
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleChange = (field, val) => {
+    setFormData((prev) => ({ ...prev, [field]: val }));
+    setSaveSuccess("");
+    setSaveError("");
+    setTestResult(null);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await apiFetch("/api/settings/test-zoho", {
+        method: "POST",
+        body: {
+          zoho_client_id: formData.zoho_client_id,
+          zoho_client_secret: formData.zoho_client_secret,
+          zoho_refresh_token: formData.zoho_refresh_token,
+          zoho_org_id: formData.zoho_org_id,
+          zoho_accounts_base: formData.zoho_accounts_base,
+          zoho_desk_base: formData.zoho_desk_base,
+        },
+      });
+      setTestResult(res);
+    } catch (err) {
+      setTestResult({ success: false, error: err.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveSuccess("");
+    setSaveError("");
+
+    const payload = {
+      zoho_client_id: formData.zoho_client_id,
+      zoho_org_id: formData.zoho_org_id,
+      zoho_accounts_base: formData.zoho_accounts_base,
+      zoho_desk_base: formData.zoho_desk_base,
+    };
+
+    if (editSecrets.zoho_client_secret || formData.zoho_client_secret) {
+      payload.zoho_client_secret = formData.zoho_client_secret;
+    }
+    if (editSecrets.zoho_refresh_token || formData.zoho_refresh_token) {
+      payload.zoho_refresh_token = formData.zoho_refresh_token;
+    }
+
+    try {
+      await apiFetch("/api/settings", {
+        method: "POST",
+        body: payload,
+      });
+      setSaveSuccess("Zoho Desk credentials saved and applied!");
+      if (onSaved) {
+        setTimeout(() => onSaved(), 500);
+      }
+    } catch (err) {
+      setSaveError(`Failed to save settings: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-container" style={{ maxWidth: "680px" }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h2 className="modal-title">⚙️ Configure Zoho Desk Credentials</h2>
+            <p className="modal-subtitle">
+              Manage OAuth 2.0 credentials to search customer tickets and conversation histories.
+            </p>
+          </div>
+          <button className="modal-close-btn" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        <div className="modal-body">
+          {loading ? (
+            <div className="app-loading" style={{ height: "180px" }}>
+              Loading credentials...
+            </div>
+          ) : (
+            <>
+              {saveSuccess && <div className="callout callout-success">✅ {saveSuccess}</div>}
+              {saveError && <div className="callout callout-danger">❌ {saveError}</div>}
+
+              {/* Guide Banner */}
+              <div className="callout callout-info" style={{ marginBottom: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span><strong>🎟️ Zoho OAuth Setup:</strong> Requires Self Client credentials with Desk scopes.</span>
+                  <button
+                    type="button"
+                    className="btn-text-action"
+                    onClick={() => setShowHelp(!showHelp)}
+                    style={{ fontSize: "12px", color: "var(--accent-strong)", fontWeight: 650 }}
+                  >
+                    {showHelp ? "Hide Guide ▲" : "View Guide 📖"}
+                  </button>
+                </div>
+                {showHelp && (
+                  <div style={{ marginTop: "10px", fontSize: "12px", lineHeight: 1.5, borderTop: "1px dashed var(--line)", paddingTop: "8px" }}>
+                    <p style={{ margin: "0 0 6px" }}>
+                      1. Open{" "}
+                      <a href="https://api-console.zoho.in" target="_blank" rel="noreferrer" className="link-highlight">
+                        Zoho API Console (India) ↗
+                      </a>{" "}
+                      or{" "}
+                      <a href="https://api-console.zoho.com" target="_blank" rel="noreferrer" className="link-highlight">
+                        Global Console (.com) ↗
+                      </a>
+                    </p>
+                    <p style={{ margin: "0 0 6px" }}>
+                      2. Create a <strong>Self Client</strong> and note the <em>Client ID</em> and <em>Client Secret</em>.
+                    </p>
+                    <p style={{ margin: "0 0 6px" }}>
+                      3. Under "Generate Code", enter the scopes:
+                      <br />
+                      <code>Desk.tickets.READ,Desk.contacts.READ,Desk.search.READ</code>
+                    </p>
+                    <p style={{ margin: 0 }}>
+                      4. Exchange the code for a permanent <strong>Refresh Token</strong> and paste it below.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="field-label">Zoho Client ID</label>
+                  <input
+                    type="text"
+                    name="zoho_client_id_field"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    className="field-input"
+                    placeholder="1000.XXXXXXXXXXXXXXXXXXXXXXXXXX"
+                    value={formData.zoho_client_id}
+                    onChange={(e) => handleChange("zoho_client_id", e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="field-label">Zoho Org ID (Organization / Portal ID)</label>
+                  <input
+                    type="text"
+                    name="zoho_org_id_field"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    className="field-input"
+                    placeholder="e.g. 60021345678"
+                    value={formData.zoho_org_id}
+                    onChange={(e) => handleChange("zoho_org_id", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="field-label">Zoho Client Secret</label>
+                  {meta.zoho_has_client_secret && !editSecrets.zoho_client_secret ? (
+                    <div className="secret-saved-row">
+                      <span className="secret-indicator">🔒 Secret configured in database</span>
+                      <button
+                        type="button"
+                        className="btn-text-action"
+                        onClick={() => setEditSecrets((p) => ({ ...p, zoho_client_secret: true }))}
+                      >
+                        Change Secret
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      type="password"
+                      name="zoho_client_secret_input"
+                      autoComplete="new-password"
+                      data-lpignore="true"
+                      className="field-input"
+                      placeholder="Enter Zoho Client Secret..."
+                      value={formData.zoho_client_secret}
+                      onChange={(e) => handleChange("zoho_client_secret", e.target.value)}
+                    />
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label className="field-label">Zoho Refresh Token</label>
+                  {meta.zoho_has_refresh_token && !editSecrets.zoho_refresh_token ? (
+                    <div className="secret-saved-row">
+                      <span className="secret-indicator">🔒 Token configured in database</span>
+                      <button
+                        type="button"
+                        className="btn-text-action"
+                        onClick={() => setEditSecrets((p) => ({ ...p, zoho_refresh_token: true }))}
+                      >
+                        Change Token
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      type="password"
+                      name="zoho_refresh_token_input"
+                      autoComplete="new-password"
+                      data-lpignore="true"
+                      className="field-input"
+                      placeholder="1000.xxxxxxxxxxxxxxxxxxxxxxxx..."
+                      value={formData.zoho_refresh_token}
+                      onChange={(e) => handleChange("zoho_refresh_token", e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <label className="field-label" style={{ marginBottom: 0 }}>Zoho Accounts Base URL</label>
+                    <div style={{ display: "flex", gap: "4px" }}>
+                      <button
+                        type="button"
+                        className="btn-text-action"
+                        style={{ fontSize: "11px" }}
+                        onClick={() => handleChange("zoho_accounts_base", "https://accounts.zoho.in")}
+                      >
+                        .in
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-text-action"
+                        style={{ fontSize: "11px" }}
+                        onClick={() => handleChange("zoho_accounts_base", "https://accounts.zoho.com")}
+                      >
+                        .com
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    name="zoho_accounts_base_input"
+                    className="field-input"
+                    style={{ marginTop: "4px" }}
+                    placeholder="https://accounts.zoho.in"
+                    value={formData.zoho_accounts_base}
+                    onChange={(e) => handleChange("zoho_accounts_base", e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <label className="field-label" style={{ marginBottom: 0 }}>Zoho Desk Base URL</label>
+                    <div style={{ display: "flex", gap: "4px" }}>
+                      <button
+                        type="button"
+                        className="btn-text-action"
+                        style={{ fontSize: "11px" }}
+                        onClick={() => handleChange("zoho_desk_base", "https://desk.zoho.in")}
+                      >
+                        .in
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-text-action"
+                        style={{ fontSize: "11px" }}
+                        onClick={() => handleChange("zoho_desk_base", "https://desk.zoho.com")}
+                      >
+                        .com
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    name="zoho_desk_base_input"
+                    className="field-input"
+                    style={{ marginTop: "4px" }}
+                    placeholder="https://desk.zoho.in"
+                    value={formData.zoho_desk_base}
+                    onChange={(e) => handleChange("zoho_desk_base", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: "12px", display: "flex", gap: "10px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="action-btn"
+                  onClick={handleTest}
+                  disabled={testing}
+                >
+                  {testing ? "Testing Zoho..." : "⚡ Test Zoho Connection"}
+                </button>
+              </div>
+
+              {testResult && (
+                <div
+                  className={`validation-box ${testResult.success ? "box-success" : "box-danger"}`}
+                  style={{ marginTop: "12px" }}
+                >
+                  {testResult.success ? (
+                    <div>
+                      <div className="box-title">✅ Zoho Desk Connected Successfully</div>
+                      <div className="box-sub">{testResult.message}</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="box-title">❌ Zoho Desk Connection Failed</div>
+                      <div className="box-sub">{testResult.error}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "💾 Save Zoho Credentials"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

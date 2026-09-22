@@ -118,6 +118,12 @@ USER_SPECIFIC_KEYS = {
     "jira_project_key",
     "jira_project_keys",
     "jira_excluded_project_keys",
+    "zoho_client_id",
+    "zoho_client_secret",
+    "zoho_refresh_token",
+    "zoho_org_id",
+    "zoho_accounts_base",
+    "zoho_desk_base",
 }
 
 

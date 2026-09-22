@@ -1010,6 +1010,8 @@ class PostgresRingGallery:
                 )
                 """
             )
+            conn.execute("ALTER TABLE ring_studio_generations ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+            conn.execute("ALTER TABLE ring_studio_generations ADD COLUMN IF NOT EXISTS user_email TEXT;")
             conn.execute("ALTER TABLE ring_studio_generations ADD COLUMN IF NOT EXISTS style_no TEXT;")
             conn.execute("ALTER TABLE ring_studio_generations ADD COLUMN IF NOT EXISTS ring_size TEXT;")
             conn.execute("ALTER TABLE ring_studio_generations ADD COLUMN IF NOT EXISTS metal_weight TEXT;")
@@ -1027,7 +1029,13 @@ class PostgresRingGallery:
                 """
             )
 
-    def save(self, result: RingViewsResult, details: Optional[RingDetails]) -> None:
+    def save(
+        self,
+        result: RingViewsResult,
+        details: Optional[RingDetails],
+        user_id: Optional[int] = None,
+        user_email: Optional[str] = None,
+    ) -> None:
         summary = result.summary
         if summary is None:
             return
@@ -1042,12 +1050,14 @@ class PostgresRingGallery:
             conn.execute(
                 """
                 INSERT INTO ring_studio_generations
-                    (style_no, ring_size, metal_weight, gross_weight, estimated, note,
+                    (user_id, user_email, style_no, ring_size, metal_weight, gross_weight, estimated, note,
                      reference, images, cost_usd)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (style_no) DO NOTHING
                 """,
                 (
+                    user_id,
+                    user_email,
                     summary.style_no, summary.ring_size, summary.metal_weight,
                     summary.gross_weight, summary.estimated, summary.note,
                     json.dumps(details.filled() if details else {}, ensure_ascii=False),
@@ -1055,21 +1065,34 @@ class PostgresRingGallery:
                     result.cost_usd,
                 ),
             )
-        log.info("Ring gallery saved %s (%d images)", summary.style_no, len(images))
+        log.info("Ring gallery saved %s (%d images, user_id=%s)", summary.style_no, len(images), user_id)
 
-    def list(self, limit: int = 100) -> list[GalleryEntry]:
+    def list(self, limit: int = 100, user_id: Optional[int] = None, is_admin: bool = False) -> list[GalleryEntry]:
         self.init_schema()
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT style_no, ring_size, metal_weight, gross_weight, estimated, note,
-                       reference, images, cost_usd, created_at
-                FROM ring_studio_generations
-                ORDER BY created_at DESC
-                LIMIT %s
-                """,
-                (max(1, min(int(limit), 500)),),
-            ).fetchall()
+            if is_admin or user_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT style_no, ring_size, metal_weight, gross_weight, estimated, note,
+                           reference, images, cost_usd, created_at
+                    FROM ring_studio_generations
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (max(1, min(int(limit), 500)),),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT style_no, ring_size, metal_weight, gross_weight, estimated, note,
+                           reference, images, cost_usd, created_at
+                    FROM ring_studio_generations
+                    WHERE user_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, max(1, min(int(limit), 500))),
+                ).fetchall()
         return [
             GalleryEntry(
                 style_no=r["style_no"], ring_size=r["ring_size"],
@@ -1084,15 +1107,24 @@ class PostgresRingGallery:
 
 
 def save_generation(
-    settings: Settings, result: RingViewsResult, details: Optional[RingDetails]
+    settings: Settings,
+    result: RingViewsResult,
+    details: Optional[RingDetails],
+    user_id: Optional[int] = None,
+    user_email: Optional[str] = None,
 ) -> None:
     """Persist one completed render to the gallery (best-effort)."""
-    PostgresRingGallery(settings).save(result, details)
+    PostgresRingGallery(settings).save(result, details, user_id=user_id, user_email=user_email)
 
 
-def list_generations(settings: Settings, limit: int = 100) -> list[GalleryEntry]:
+def list_generations(
+    settings: Settings,
+    limit: int = 100,
+    user_id: Optional[int] = None,
+    is_admin: bool = False,
+) -> list[GalleryEntry]:
     """Every generated ring, newest first."""
-    return PostgresRingGallery(settings).list(limit)
+    return PostgresRingGallery(settings).list(limit=limit, user_id=user_id, is_admin=is_admin)
 
 
 # ─── Pydantic request/response models ────────────────────────────────────────
