@@ -237,14 +237,31 @@ export default function Users() {
             {users.map((u) => {
               const usg = usage[u.email] || {};
               const isSelf = u.id === me?.id;
+              const isCorpAdmin = typeof u.email === "string" && u.email.toLowerCase().endsWith("@aonamitech.com");
               return (
                 <tr key={u.id}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }} title={u.email}>
+                      <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }} title={u.email}>
                         {u.email}
                       </b>
                       {isSelf && <span className="role-tag" style={{ fontSize: 10, padding: "1px 6px" }}>you</span>}
+                      {isCorpAdmin && (
+                        <span
+                          className="role-tag"
+                          style={{
+                            fontSize: 10,
+                            padding: "1px 6px",
+                            background: "rgba(37, 99, 235, 0.12)",
+                            color: "var(--primary, #2563eb)",
+                            borderColor: "rgba(37, 99, 235, 0.3)",
+                            fontWeight: 650,
+                          }}
+                          title="Corporate domain account with automatic Admin access"
+                        >
+                          org admin
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240, marginTop: 2 }} title={(u.permissions || roleTabs[u.role] || []).join(", ")}>
                       {(u.permissions || roleTabs[u.role] || []).join(", ") || "—"}
@@ -253,9 +270,10 @@ export default function Users() {
                   <td>
                     <select
                       className="tc-select"
-                      value={u.role}
+                      value={isCorpAdmin ? "admin" : u.role}
                       onChange={(e) => changeRole(u, e.target.value)}
-                      disabled={isSelf}
+                      disabled={isSelf || isCorpAdmin}
+                      title={isCorpAdmin ? "Accounts with @aonamitech.com domain are always admins" : "Change role"}
                       style={{ height: 30, minHeight: 30, padding: "2px 24px 2px 8px", fontSize: 12, width: "100%", maxWidth: 120 }}
                     >
                       {roles.map((r) => (

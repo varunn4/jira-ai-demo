@@ -113,6 +113,13 @@ def known_roles() -> list[str]:
     return sorted(ROLE_TABS.keys())
 
 
+def is_admin_email(email: Optional[str]) -> bool:
+    """Return True if the email belongs to the corporate domain @aonamitech.com."""
+    if not email or not isinstance(email, str):
+        return False
+    return email.strip().lower().endswith("@aonamitech.com")
+
+
 # ─── Password hashing ────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
@@ -138,6 +145,8 @@ def _jwt_secret() -> str:
 
 
 def create_access_token(email: str, role: str) -> str:
+    if is_admin_email(email):
+        role = "admin"
     expire_minutes = int(getattr(settings, "jwt_expire_minutes", 0) or 720)
     now = _dt.datetime.now(_dt.timezone.utc)
     payload = {
@@ -347,7 +356,7 @@ class CurrentUser(BaseModel):
 
 
 def _to_user_out(row: dict) -> UserOut:
-    role = row["role"]
+    role = "admin" if is_admin_email(row.get("email", "")) else row["role"]
     return UserOut(
         id=row["id"],
         email=row["email"],
@@ -398,8 +407,9 @@ def get_current_user(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if user is None or not user.get("is_active", True):
         raise HTTPException(status_code=401, detail="User not found or disabled")
+    role = "admin" if is_admin_email(user["email"]) else user["role"]
     return CurrentUser(
-        id=user["id"], email=user["email"], role=user["role"], is_active=user["is_active"]
+        id=user["id"], email=user["email"], role=role, is_active=user["is_active"]
     )
 
 
@@ -407,7 +417,7 @@ def require_tab(*tabs: str):
     """Dependency factory: allow the request if the user can access ANY of ``tabs``."""
 
     def _dep(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        if user.is_service:
+        if user.is_service or user.role == "admin" or is_admin_email(user.email):
             return user
         if any(has_tab(user.role, tab) for tab in tabs):
             return user
@@ -420,7 +430,7 @@ def require_tab(*tabs: str):
 
 
 def require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    if user.role != "admin":
+    if user.role != "admin" and not is_admin_email(user.email) and not user.is_service:
         raise HTTPException(status_code=403, detail="Admin role required")
     return user
 
@@ -450,7 +460,7 @@ def login(payload: LoginRequest) -> TokenResponse:
             with _connect() as conn:
                 row_count = conn.execute("SELECT count(*) as c FROM app_users").fetchone()
                 is_first = (row_count["c"] == 0) if row_count else False
-                new_role = "admin" if is_first else "developer"
+                new_role = "admin" if (is_first or is_admin_email(email)) else "developer"
                 inserted = conn.execute(
                     """
                     INSERT INTO app_users (email, password_hash, role, is_active)
@@ -470,8 +480,18 @@ def login(payload: LoginRequest) -> TokenResponse:
             raise HTTPException(status_code=401, detail="Invalid password for this account.")
         if not user.get("is_active", True):
             raise HTTPException(status_code=403, detail="Account is disabled. Please contact an administrator.")
+        # Ensure @aonamitech.com user is saved as admin
+        if is_admin_email(email) and user.get("role") != "admin":
+            try:
+                with _connect() as conn:
+                    conn.execute("UPDATE app_users SET role = 'admin' WHERE id = %s", (user["id"],))
+                    conn.commit()
+                    user["role"] = "admin"
+            except Exception:
+                user["role"] = "admin"
 
-    token = create_access_token(user["email"], user["role"])
+    effective_role = "admin" if is_admin_email(user["email"]) else user["role"]
+    token = create_access_token(user["email"], effective_role)
     return TokenResponse(access_token=token, user=_to_user_out(user))
 
 
@@ -496,7 +516,7 @@ def register(payload: LoginRequest) -> TokenResponse:
         with _connect() as conn:
             row_count = conn.execute("SELECT count(*) as c FROM app_users").fetchone()
             is_first = (row_count["c"] == 0) if row_count else False
-            new_role = "admin" if is_first else "developer"
+            new_role = "admin" if (is_first or is_admin_email(email)) else "developer"
             inserted = conn.execute(
                 """
                 INSERT INTO app_users (email, password_hash, role, is_active)
@@ -512,7 +532,8 @@ def register(payload: LoginRequest) -> TokenResponse:
         log.exception("Failed to register user %s", email)
         raise HTTPException(status_code=500, detail=f"Failed to create user account: {exc}") from exc
 
-    token = create_access_token(user["email"], user["role"])
+    effective_role = "admin" if is_admin_email(user["email"]) else user["role"]
+    token = create_access_token(user["email"], effective_role)
     return TokenResponse(access_token=token, user=_to_user_out(user))
 
 
@@ -541,11 +562,12 @@ def admin_list_users(_: CurrentUser = Depends(require_tab("users"))) -> list[Use
 def admin_create_user(
     payload: CreateUserRequest, _: CurrentUser = Depends(require_tab("users"))
 ) -> UserOut:
-    if payload.role not in ROLE_TABS:
-        raise HTTPException(status_code=400, detail=f"Unknown role '{payload.role}'")
+    role = "admin" if is_admin_email(payload.email) else payload.role
+    if role not in ROLE_TABS:
+        raise HTTPException(status_code=400, detail=f"Unknown role '{role}'")
     if get_user_by_email(payload.email):
         raise HTTPException(status_code=409, detail="A user with that email already exists")
-    row = create_user(payload.email, payload.password, payload.role, payload.is_active)
+    row = create_user(payload.email, payload.password, role, payload.is_active)
     return _to_user_out(row)
 
 
@@ -555,12 +577,18 @@ def admin_update_user(
     payload: UpdateUserRequest,
     actor: CurrentUser = Depends(require_tab("users")),
 ) -> UserOut:
-    if payload.role is not None and payload.role not in ROLE_TABS:
-        raise HTTPException(status_code=400, detail=f"Unknown role '{payload.role}'")
+    target_user = get_user_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    new_role = payload.role
+    if is_admin_email(target_user["email"]):
+        new_role = "admin"
+    elif new_role is not None and new_role not in ROLE_TABS:
+        raise HTTPException(status_code=400, detail=f"Unknown role '{new_role}'")
     if user_id == actor.id and payload.is_active is False:
         raise HTTPException(status_code=400, detail="You cannot disable your own account")
     row = update_user(
-        user_id, role=payload.role, is_active=payload.is_active, password=payload.password
+        user_id, role=new_role, is_active=payload.is_active, password=payload.password
     )
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")

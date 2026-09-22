@@ -51,12 +51,20 @@ export function AuthProvider({ children }) {
     return data.user;
   }, []);
 
+  const isAdmin =
+    user?.role === "admin" ||
+    (typeof user?.email === "string" && user.email.toLowerCase().endsWith("@aonamitech.com"));
+
   const hasTab = useCallback(
-    (tab) => !!user && Array.isArray(user.permissions) && user.permissions.includes(tab),
-    [user],
+    (tab) => {
+      if (!user) return false;
+      if (isAdmin) return true;
+      return Array.isArray(user.permissions) && (user.permissions.includes("*") || user.permissions.includes(tab));
+    },
+    [user, isAdmin],
   );
 
-  const value = { user, loading, login, logout, hasTab, isAdmin: user?.role === "admin" };
+  const value = { user, loading, login, logout, hasTab, isAdmin };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
