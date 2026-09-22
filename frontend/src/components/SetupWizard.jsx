@@ -444,8 +444,18 @@ export default function SetupWizard({ onComplete }) {
                     </div>
                   ) : (
                     <div>
-                      <div className="box-title">❌ GitHub Connection / Sync Failed</div>
-                      <div className="box-sub">
+                      <div className="box-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>❌ GitHub Connection / Sync Failed</span>
+                        <a
+                          href="https://github.com/settings/tokens"
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline" }}
+                        >
+                          Open GitHub Tokens ↗
+                        </a>
+                      </div>
+                      <div className="box-sub" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 6, fontSize: "12.5px" }}>
                         {repoValidation.error || "Unable to find or clone repositories from GitHub. Please check the organization name, repository URL, or provide a GitHub Personal Access Token."}
                       </div>
                     </div>

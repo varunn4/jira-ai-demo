@@ -484,8 +484,20 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         </div>
                       ) : (
                         <div>
-                          <div className="box-title">❌ GitHub Sync Error</div>
-                          <div className="box-sub">{repoValidation.error}</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span>❌ GitHub Sync Error</span>
+                            <a
+                              href="https://github.com/settings/tokens"
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline" }}
+                            >
+                              Open GitHub Tokens ↗
+                            </a>
+                          </div>
+                          <div className="box-sub" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 6, fontSize: "12.5px" }}>
+                            {repoValidation.error}
+                          </div>
                         </div>
                       )}
                     </div>

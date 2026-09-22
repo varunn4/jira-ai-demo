@@ -44,7 +44,7 @@ def get_setup_status(_user: CurrentUser = Depends(require_tab("repos"))) -> dict
     missing: list[str] = []
 
     # 1. Repositories (check if user has synced repositories into workspace)
-    repos = discover_graph_repositories(settings)
+    repos = discover_graph_repositories(settings, user_id=getattr(_user, "id", None))
     if not repos:
         missing.append("repositories")
 
@@ -201,7 +201,8 @@ def save_settings(
                 set_user_settings_bulk(settings, _user.id, _user.email, to_save)
             except Exception as exc:
                 log.warning("Failed to save user settings for user_id=%s: %s", _user.id, exc)
-        set_settings_bulk(settings, to_save)
+        else:
+            set_settings_bulk(settings, to_save)
         reload_settings()
         log.info("Dynamic settings saved and reloaded for user=%s: %s", getattr(_user, "email", "global"), list(to_save.keys()))
 
@@ -251,7 +252,7 @@ def validate_github_integration(
         log.warning("GitHub repository discovery failed: %s", exc)
         return {"valid": False, "error": str(exc), "repo_count": 0, "repos": []}
 
-    # Clone / Sync discovered repositories
+    # Clone / Sync discovered repositories into user workspace
     cloned_repos: list[dict[str, Any]] = []
     failed_clones: list[dict[str, str]] = []
 
@@ -262,7 +263,13 @@ def validate_github_integration(
         if not clone_url or not name:
             continue
         try:
-            info = clone_or_sync_repo(clone_url=clone_url, target_name=name, token=token, branch=branch)
+            info = clone_or_sync_repo(
+                clone_url=clone_url,
+                target_name=name,
+                token=token,
+                branch=branch,
+                user_id=getattr(_user, "id", None),
+            )
             cloned_repos.append(info)
         except Exception as clone_exc:
             log.warning("Failed cloning repo %s: %s", name, clone_exc)
@@ -288,7 +295,8 @@ def validate_github_integration(
 
     if hasattr(_user, "id") and _user.id:
         set_user_settings_bulk(settings, _user.id, _user.email, to_save)
-    set_settings_bulk(settings, to_save)
+    else:
+        set_settings_bulk(settings, to_save)
     reload_settings()
 
     return {

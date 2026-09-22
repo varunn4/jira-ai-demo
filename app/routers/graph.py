@@ -54,7 +54,7 @@ def graph_admin_repositories(
     _user: CurrentUser = Depends(require_tab("repos")),
 ) -> dict[str, Any]:
     log.info("GET /graph-admin/repositories")
-    repositories = discover_graph_repositories(settings)
+    repositories = discover_graph_repositories(settings, user_id=getattr(_user, "id", None))
     log.info("Returning %d repositories", len(repositories))
     return {
         "repository_count": len(repositories),
@@ -77,7 +77,7 @@ def graph_admin_trigger(
         request.include_jira_tickets,
         len(request.repositories),
     )
-    repositories = discover_graph_repositories(settings)
+    repositories = discover_graph_repositories(settings, user_id=getattr(_user, "id", None))
     selected_repositories = _selected_repositories(repositories, request.repositories)
     if request.action != "jira_tickets_only" and not selected_repositories:
         raise HTTPException(status_code=400, detail="Select at least one repository")

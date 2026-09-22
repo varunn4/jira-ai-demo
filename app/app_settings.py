@@ -105,11 +105,30 @@ def set_settings_bulk(settings: Settings, items: dict[str, str]) -> None:
         conn.commit()
 
 
+USER_SPECIFIC_KEYS = {
+    "setup_completed",
+    "github_source_type",
+    "github_org_or_user",
+    "github_repo_urls",
+    "github_token",
+    "github_org",
+    "jira_base_url",
+    "jira_email",
+    "jira_api_token",
+    "jira_project_key",
+    "jira_project_keys",
+    "jira_excluded_project_keys",
+}
+
+
 def get_all_user_settings(settings: Settings, user_id: Optional[int] = None, user_email: Optional[str] = None) -> dict[str, str]:
-    """Return key-value settings for a specific user, overlaid on top of global system defaults."""
+    """Return key-value settings for a specific user, isolating user-specific credentials from global leakages."""
     base_settings = get_all_settings(settings)
     if not settings.database_url or not user_id:
         return base_settings
+
+    # If user_id is provided, strip user-specific keys from global base so one user never sees another's repos/tokens
+    cleaned_base = {k: v for k, v in base_settings.items() if k not in USER_SPECIFIC_KEYS}
 
     try:
         with _connect(settings) as conn:
@@ -132,11 +151,11 @@ def get_all_user_settings(settings: Settings, user_id: Optional[int] = None, use
                 (user_id,),
             ).fetchall()
             user_overrides = {r["key"]: r["value"] for r in rows if r.get("key") and r.get("value") is not None}
-            base_settings.update(user_overrides)
-            return base_settings
+            cleaned_base.update(user_overrides)
+            return cleaned_base
     except Exception as exc:  # noqa: BLE001
         LOGGER.debug("get_all_user_settings failed for user_id=%s: %s", user_id, exc)
-        return base_settings
+        return cleaned_base
 
 
 def set_user_settings_bulk(settings: Settings, user_id: int, user_email: str, items: dict[str, str]) -> None:

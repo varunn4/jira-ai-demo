@@ -19,9 +19,14 @@ from app.config import Settings
 log = logging.getLogger(__name__)
 
 
-def get_workspace_repos_dir() -> Path:
-    """Return the managed workspace directory for cloned/synced repositories."""
-    base = Path("/app/workspace/repos") if Path("/app").exists() else Path("./workspace/repos")
+def get_workspace_repos_dir(user_id: Optional[int] = None) -> Path:
+    """Return the managed workspace directory for cloned/synced repositories.
+    If user_id is provided, returns a user-isolated repository workspace.
+    """
+    if user_id:
+        base = (Path("/app/workspace/users") if Path("/app").exists() else Path("./workspace/users")) / str(user_id) / "repos"
+    else:
+        base = Path("/app/workspace/repos") if Path("/app").exists() else Path("./workspace/repos")
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -29,9 +34,10 @@ def get_workspace_repos_dir() -> Path:
 def discover_graph_repositories(
     settings: Settings,
     only_names: set[str] | list[str] | None = None,
+    user_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    """Discover all Git repositories synchronized into the managed workspace."""
-    workspace_dir = get_workspace_repos_dir()
+    """Discover all Git repositories synchronized into the managed workspace for the given user."""
+    workspace_dir = get_workspace_repos_dir(user_id=user_id)
 
     excluded_names = {
         name.strip().lower()
@@ -40,7 +46,7 @@ def discover_graph_repositories(
     }
     wanted = set(only_names) if only_names else None
 
-    log.info("Discovering repositories under %s (filter: %s)", workspace_dir, wanted or "all")
+    log.info("Discovering repositories under %s (filter: %s, user_id: %s)", workspace_dir, wanted or "all", user_id)
 
     seen_names: set[str] = set()
     repositories: list[dict[str, Any]] = []
@@ -64,6 +70,17 @@ def discover_graph_repositories(
                     _add_if_git(child, child)
         except Exception as exc:
             log.warning("Error scanning workspace repos %s: %s", workspace_dir, exc)
+
+    # If user-specific dir is empty and user_id is None, also check legacy global dir
+    if not repositories and user_id is None:
+        global_dir = get_workspace_repos_dir(None)
+        if global_dir.exists() and global_dir != workspace_dir:
+            try:
+                for child in sorted(global_dir.iterdir()):
+                    if child.is_dir():
+                        _add_if_git(child, child)
+            except Exception as exc:
+                log.warning("Error scanning fallback global repos %s: %s", global_dir, exc)
 
     repositories.sort(key=lambda repo: repo["name"].lower())
     log.info("Discovered %d repositories in workspace", len(repositories))
@@ -164,14 +181,33 @@ def fetch_github_org_repos(org_or_user: str, token: str = "") -> list[dict[str, 
             if exc.code == 404:
                 continue
             if exc.code == 401:
-                raise RuntimeError("GitHub API returned 401 Unauthorized: The provided Personal Access Token (PAT) is invalid, expired, or does not have access. Please verify your token at github.com/settings/tokens.")
+                raise RuntimeError(
+                    "GitHub API 401 Unauthorized: The provided Personal Access Token (PAT) is invalid, expired, or missing permissions.\n\n"
+                    "👉 Resolution:\n"
+                    "1. Visit github.com/settings/tokens to generate a Classic Personal Access Token.\n"
+                    "2. Check the 'repo' scope checkbox.\n"
+                    "3. Paste the token into the GitHub Token field and retry."
+                )
+            if exc.code == 403:
+                raise RuntimeError(
+                    f"GitHub API 403 Forbidden: API rate limit exceeded or access restricted ({exc.reason}).\n\n"
+                    "👉 Resolution:\n"
+                    "Add a GitHub Personal Access Token (PAT) to increase your hourly rate limit from 60 to 5,000 requests/hr and access private repositories."
+                )
             raise RuntimeError(f"GitHub API error ({exc.code}): {exc.reason}")
         except Exception as exc:
-            if "401" in str(exc):
-                raise RuntimeError("GitHub API returned 401 Unauthorized: The provided Personal Access Token (PAT) is invalid, expired, or does not have access. Please verify your token at github.com/settings/tokens.")
+            err_str = str(exc)
+            if "401" in err_str:
+                raise RuntimeError(
+                    "GitHub API 401 Unauthorized: The provided Personal Access Token (PAT) is invalid or expired.\n\n"
+                    "👉 Resolution: Generate a new Classic Token with 'repo' scope at github.com/settings/tokens."
+                )
             raise RuntimeError(f"Failed to connect to GitHub API: {exc}")
 
-    raise RuntimeError(f"GitHub organization or user '{slug}' not found.")
+    raise RuntimeError(
+        f"GitHub organization or user '{slug}' not found (or no accessible repositories).\n\n"
+        "👉 Resolution: Verify the handle. If the organization contains only private repositories, provide a GitHub Personal Access Token with 'repo' scope."
+    )
 
 
 def fetch_single_github_repo(url_or_slug: str, token: str = "") -> dict[str, Any]:
@@ -208,13 +244,27 @@ def fetch_single_github_repo(url_or_slug: str, token: str = "") -> dict[str, Any
                 }
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            raise RuntimeError(f"Repository '{slug}' not found on GitHub. If it is private, provide a valid GitHub Personal Access Token (PAT) with 'repo' scope.")
+            raise RuntimeError(
+                f"Repository '{slug}' not found on GitHub (HTTP 404).\n\n"
+                "👉 Resolution:\n"
+                "If this is a PRIVATE repository, GitHub hides it until you supply a Personal Access Token.\n"
+                "Provide a GitHub PAT with 'repo' scope at github.com/settings/tokens."
+            )
         if exc.code == 401:
-            raise RuntimeError("GitHub API returned 401 Unauthorized: The provided Personal Access Token (PAT) is invalid, expired, or does not have access to this repository. Please verify your token.")
+            raise RuntimeError(
+                "GitHub API 401 Unauthorized: The provided Personal Access Token (PAT) is invalid or expired.\n\n"
+                "👉 Resolution: Generate a new token with 'repo' scope at github.com/settings/tokens."
+            )
+        if exc.code == 403:
+            raise RuntimeError(
+                f"GitHub API 403 Forbidden: {exc.reason}.\n\n"
+                "👉 Resolution: Ensure your PAT has SSO authorization or required permissions."
+            )
         raise RuntimeError(f"GitHub API error ({exc.code}): {exc.reason}")
     except Exception as exc:
-        if "401" in str(exc):
-            raise RuntimeError("GitHub API returned 401 Unauthorized: The provided Personal Access Token (PAT) is invalid, expired, or does not have access to this repository.")
+        err_str = str(exc)
+        if "401" in err_str:
+            raise RuntimeError("GitHub API 401 Unauthorized: The provided Personal Access Token is invalid or expired.")
         raise RuntimeError(f"Failed to fetch GitHub repository '{slug}': {exc}")
 
 
@@ -223,9 +273,10 @@ def clone_or_sync_repo(
     target_name: str,
     token: str = "",
     branch: str = "main",
+    user_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """Clone or pull latest commits of a repository into the managed workspace."""
-    workspace = get_workspace_repos_dir()
+    workspace = get_workspace_repos_dir(user_id=user_id)
     repo_dir = workspace / target_name
 
     auth_url = clone_url
@@ -249,7 +300,13 @@ def clone_or_sync_repo(
             # If specified branch failed, try default clone
             res = subprocess.run(["git", "clone", "--depth", "100", auth_url, str(repo_dir)], capture_output=True, text=True, timeout=120)
             if res.returncode != 0:
-                raise RuntimeError(f"Failed to clone repository '{target_name}': {res.stderr.strip() or res.stdout.strip()}")
+                raw_err = res.stderr.strip() or res.stdout.strip()
+                if "Authentication failed" in raw_err or "Repository not found" in raw_err or "could not read Username" in raw_err:
+                    raise RuntimeError(
+                        f"Authentication failed for repository '{target_name}'.\n\n"
+                        "👉 If this is a private repository, please provide a valid GitHub Personal Access Token (PAT) with 'repo' scope."
+                    )
+                raise RuntimeError(f"Failed to clone repository '{target_name}': {raw_err}")
 
     return _repository_info(scan_path=repo_dir, host_path=repo_dir)
 
