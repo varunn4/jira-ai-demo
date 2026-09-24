@@ -422,7 +422,7 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
                 bot_reply = llm.complete(
                     system_prompt="You are AI Governor, an autonomous Scrum Master and delivery governance agent.",
                     user_message=prompt,
-                    max_tokens=250,
+                    max_tokens=800,
                 ).strip()
                 slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
                 return
@@ -435,10 +435,10 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
         bot_reply = llm.complete(
             system_prompt=(
                 "You are AI Governor, an autonomous Scrum Master and delivery governor assisting the team on Slack. "
-                "Keep replies concise (2-4 sentences max), professional, actionable, and friendly."
+                "Provide clear, complete, helpful, professional, and actionable responses."
             ),
             user_message=text,
-            max_tokens=150,
+            max_tokens=800,
         ).strip()
         slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
     except Exception as exc:

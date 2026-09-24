@@ -32,10 +32,11 @@ export default function JiraTickets() {
   const [downloading, setDownloading] = useState(false);
   const [info, setInfo] = useState({ msg: "", error: false });
 
-  async function loadData() {
+  async function loadData(forceRefresh = false) {
     setLoading(true);
-    setInfo({ msg: "", error: false });
+    setInfo({ msg: forceRefresh ? "🔄 Fetching latest tickets from Jira Cloud..." : "", error: false });
     const params = new URLSearchParams({ limit: "500", match_type: "all" });
+    if (forceRefresh) params.set("force_refresh", "true");
     const proj = projectKey.trim().toUpperCase();
     if (proj) params.set("project_key", proj);
 
@@ -52,6 +53,9 @@ export default function JiraTickets() {
       setTotalScanned(data.total_tickets || 0);
       setCounts(data.counts || {});
       setTickets(data.tickets || []);
+      if (forceRefresh) {
+        setInfo({ msg: `✓ Synchronized ${data.total_tickets || 0} tickets from Jira Cloud!`, error: false });
+      }
     } catch (err) {
       setInfo({ msg: err.message, error: true });
       setTickets([]);
@@ -295,7 +299,7 @@ export default function JiraTickets() {
           <button
             type="button"
             className="secondary"
-            onClick={loadData}
+            onClick={() => loadData(true)}
             style={{
               width: "auto",
               minHeight: "unset",
