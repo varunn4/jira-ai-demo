@@ -2,8 +2,32 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { apiDownload, apiFetch } from "../api";
 import JobProgress from "../components/JobProgress.jsx";
 import EmbeddingsStatus from "../components/EmbeddingsStatus.jsx";
+import {
+  Lightning,
+  Ticket,
+  Brain,
+  Tag,
+  ArrowsClockwise,
+  CaretUp,
+  CaretDown,
+  Circle,
+  MagnifyingGlass,
+  X,
+  SpinnerGap,
+  FileText,
+  Package,
+  Check,
+  ChartBar,
+  Timer,
+  TrendUp,
+  Users,
+  ChatText,
+} from "@phosphor-icons/react";
 
 const EMBED_MODELS = ["codebase_bge_m3", "codebase_qwen3_0_6b", "codebase_mxbai_large"];
+
+// Inline icon + text item used in the telemetry line and insights modal.
+const metaItem = { display: "inline-flex", alignItems: "center", gap: "4px" };
 
 // Activity score → label + badge style. Mirrors the recency/frequency blend
 // computed on the backend (see app/repository_discovery.py).
@@ -261,7 +285,7 @@ export default function Repositories({
             style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", userSelect: "none" }}
             onClick={() => setIsEngineOpen(!isEngineOpen)}
           >
-            <span style={{ fontSize: "16px" }}>⚡</span>
+            <Lightning size={18} weight="fill" color="var(--accent, #4f46e5)" />
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <h2
@@ -313,7 +337,7 @@ export default function Repositories({
                   minHeight: "32px",
                 }}
               >
-                <span>⚡</span> Sync & Update
+                <Lightning size={14} weight="fill" /> Sync & Update
               </button>
             )}
 
@@ -370,7 +394,15 @@ export default function Repositories({
                 gap: "4px",
               }}
             >
-              {isEngineOpen || busy || job ? "▲ Collapse Controls" : "▼ Expand Controls & Embeddings"}
+              {isEngineOpen || busy || job ? (
+                <>
+                  <CaretUp size={12} weight="bold" /> Collapse Controls
+                </>
+              ) : (
+                <>
+                  <CaretDown size={12} weight="bold" /> Expand Controls & Embeddings
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -406,7 +438,7 @@ export default function Repositories({
                   fontWeight: "600",
                 }}
               >
-                <span>⚡</span> Incremental Sync & Update
+                <Lightning size={15} weight="fill" /> Incremental Sync & Update
               </button>
 
               <button
@@ -424,7 +456,7 @@ export default function Repositories({
                   color: "var(--ink, #0f172a)",
                 }}
               >
-                <span>🎫</span> Sync Jira Tickets Only
+                <Ticket size={15} /> Sync Jira Tickets Only
               </button>
 
               <button
@@ -442,7 +474,7 @@ export default function Repositories({
                   color: "var(--accent-strong, #4338ca)",
                 }}
               >
-                <span>🧠</span> Codebase Embeddings Only
+                <Brain size={15} /> Codebase Embeddings Only
               </button>
 
               <button
@@ -460,7 +492,7 @@ export default function Repositories({
                   color: "#059669",
                 }}
               >
-                <span>🏷️</span> Jira Embeddings Only
+                <Tag size={15} /> Jira Embeddings Only
               </button>
 
               <button
@@ -486,7 +518,7 @@ export default function Repositories({
                   color: "#dc2626",
                 }}
               >
-                <span>🔄</span> Full Rebuild Vector DB
+                <ArrowsClockwise size={15} weight="bold" /> Full Rebuild Vector DB
               </button>
 
               <button
@@ -501,9 +533,13 @@ export default function Repositories({
                   cursor: "pointer",
                   marginLeft: "auto",
                   textDecoration: "underline",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
                 }}
               >
-                {showAdvancedSync ? "Hide Advanced Options ▲" : "Show Advanced Options ▼"}
+                {showAdvancedSync ? "Hide Advanced Options" : "Show Advanced Options"}
+                {showAdvancedSync ? <CaretUp size={12} weight="bold" /> : <CaretDown size={12} weight="bold" />}
               </button>
             </div>
 
@@ -765,9 +801,12 @@ export default function Repositories({
                 color: filterTier === "active" ? "var(--ok, #059669)" : "var(--muted, #64748b)",
                 boxShadow: filterTier === "active" ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                 transform: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
               }}
             >
-              🟢 Active ({statsSummary.active})
+              <Circle size={9} weight="fill" color="#10b981" /> Active ({statsSummary.active})
             </button>
 
             <button
@@ -786,9 +825,12 @@ export default function Repositories({
                 color: filterTier === "moderate" ? "var(--warn, #d97706)" : "var(--muted, #64748b)",
                 boxShadow: filterTier === "moderate" ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                 transform: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
               }}
             >
-              🟡 Moderate ({statsSummary.moderate})
+              <Circle size={9} weight="fill" color="#f59e0b" /> Moderate ({statsSummary.moderate})
             </button>
 
             <button
@@ -807,9 +849,12 @@ export default function Repositories({
                 color: filterTier === "low" ? "#0284c7" : "var(--muted, #64748b)",
                 boxShadow: filterTier === "low" ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                 transform: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
               }}
             >
-              🔵 Low ({statsSummary.low})
+              <Circle size={9} weight="fill" color="#38bdf8" /> Low ({statsSummary.low})
             </button>
 
             <button
@@ -828,9 +873,12 @@ export default function Repositories({
                 color: filterTier === "stale" ? "#475569" : "var(--muted, #64748b)",
                 boxShadow: filterTier === "stale" ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                 transform: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
               }}
             >
-              ⚪ Stale ({statsSummary.stale})
+              <Circle size={9} weight="fill" color="#94a3b8" /> Stale ({statsSummary.stale})
             </button>
           </div>
         </div>
@@ -856,7 +904,7 @@ export default function Repositories({
                 margin: 0,
               }}
             />
-            <span style={{ position: "absolute", left: "8px", top: "9px", fontSize: "11px", opacity: 0.5 }}>🔍</span>
+            <MagnifyingGlass size={13} style={{ position: "absolute", left: "8px", top: "10px", opacity: 0.5, pointerEvents: "none" }} />
             {searchQuery && (
               <button
                 type="button"
@@ -875,9 +923,11 @@ export default function Repositories({
                   fontSize: "11px",
                   boxShadow: "none",
                   transform: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
                 }}
               >
-                ✕
+                <X size={12} weight="bold" />
               </button>
             )}
           </div>
@@ -902,7 +952,15 @@ export default function Repositories({
             }}
             title="Scan Git history across local clones to update commit statistics and vitality ranking"
           >
-            {recalculating ? "⏳ Recalculating…" : "🔄 Recalculate"}
+            {recalculating ? (
+              <>
+                <SpinnerGap size={15} className="animate-spin" /> Recalculating…
+              </>
+            ) : (
+              <>
+                <ArrowsClockwise size={15} weight="bold" /> Recalculate
+              </>
+            )}
           </button>
 
           {/* Download Report Button + Format Dropdown */}
@@ -940,7 +998,15 @@ export default function Repositories({
               }}
               title={`Download code analysis report as ${reportFormat.toUpperCase()}`}
             >
-              {isDownloading ? `⏳ Exporting ${reportFormat.toUpperCase()}...` : `📄 Report (${reportFormat.toUpperCase()})`}
+              {isDownloading ? (
+                <>
+                  <SpinnerGap size={15} className="animate-spin" /> Exporting {reportFormat.toUpperCase()}...
+                </>
+              ) : (
+                <>
+                  <FileText size={15} /> Report ({reportFormat.toUpperCase()})
+                </>
+              )}
             </button>
             <select
               value={reportFormat}
@@ -984,7 +1050,15 @@ export default function Repositories({
             }}
             title="Pack selected repositories into token-efficient XML files for LLM test generation"
           >
-            {repomixing ? "⏳ Packing..." : "📦 RepoMix"}
+            {repomixing ? (
+              <>
+                <SpinnerGap size={15} className="animate-spin" /> Packing...
+              </>
+            ) : (
+              <>
+                <Package size={15} /> RepoMix
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -1054,7 +1128,8 @@ export default function Repositories({
                         color: selected.has(r.name) ? "var(--ok, #059669)" : "var(--muted, #64748b)",
                         border: "1px solid " + (selected.has(r.name) ? "rgba(5, 150, 105, 0.2)" : "rgba(100, 116, 139, 0.15)"),
                       }}>
-                        {selected.has(r.name) ? "✓ Auto-Indexed" : "○ Skipped"}
+                        {selected.has(r.name) ? <Check size={11} weight="bold" /> : <Circle size={11} />}
+                        {selected.has(r.name) ? "Auto-Indexed" : "Skipped"}
                       </div>
                     </td>
 
@@ -1100,9 +1175,12 @@ export default function Repositories({
                               cursor: "pointer",
                               boxShadow: "none",
                               transform: "none",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                           >
-                            Insights 📊
+                            <ChartBar size={12} weight="bold" /> Insights
                           </button>
                         </div>
 
@@ -1119,12 +1197,12 @@ export default function Repositories({
                         </div>
 
                         {/* Metric summary line */}
-                        <div style={{ fontSize: "11.5px", color: "var(--muted, #64748b)", display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                          <span>⏱️ Last commit: <strong style={{ color: "var(--ink, #0f172a)" }}>{b.lastRel}</strong></span>
+                        <div style={{ fontSize: "11.5px", color: "var(--muted, #64748b)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
+                          <span style={metaItem}><Timer size={12} /> Last commit: <strong style={{ color: "var(--ink, #0f172a)" }}>{b.lastRel}</strong></span>
                           <span>·</span>
-                          <span>📈 <strong style={{ color: "var(--ink, #0f172a)" }}>{b.commits90}</strong> commits (90d)</span>
+                          <span style={metaItem}><TrendUp size={12} /> <strong style={{ color: "var(--ink, #0f172a)" }}>{b.commits90}</strong> commits (90d)</span>
                           <span>·</span>
-                          <span>👥 <strong style={{ color: "var(--ink, #0f172a)" }}>{b.authors}</strong> {b.authors === 1 ? "author" : "authors"}</span>
+                          <span style={metaItem}><Users size={12} /> <strong style={{ color: "var(--ink, #0f172a)" }}>{b.authors}</strong> {b.authors === 1 ? "author" : "authors"}</span>
                         </div>
 
                         {/* Last Commit message */}
@@ -1137,7 +1215,7 @@ export default function Repositories({
                             textOverflow: "ellipsis",
                             maxWidth: "440px",
                           }} title={b.lastMsg}>
-                            <span style={{ color: "var(--muted, #64748b)" }}>💬 &ldquo;{b.lastMsg}&rdquo;</span>
+                            <span style={{ color: "var(--muted, #64748b)" }}><ChatText size={12} style={{ verticalAlign: "-2px", marginRight: "4px" }} />&ldquo;{b.lastMsg}&rdquo;</span>
                             {b.lastAuthor && <span style={{ color: "var(--muted, #94a3b8)" }}> — {b.lastAuthor}</span>}
                           </div>
                         )}
@@ -1212,9 +1290,12 @@ export default function Repositories({
                   padding: "4px 8px",
                   boxShadow: "none",
                   transform: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
                 }}
+                aria-label="Close"
               >
-                ✕
+                <X size={18} weight="bold" />
               </button>
             </div>
 
@@ -1252,8 +1333,8 @@ export default function Repositories({
                       padding: "12px 14px",
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: "700", color: "#0284c7", fontSize: "12.5px" }}>
-                          ⏱️ Commit Recency (60% weight)
+                        <span style={{ ...metaItem, fontWeight: "700", color: "#0284c7", fontSize: "12.5px" }}>
+                          <Timer size={14} weight="bold" /> Commit Recency (60% weight)
                         </span>
                         <span style={{ fontWeight: "800", color: "#0284c7", fontSize: "13px" }}>
                           {b.recencyPts} / 60 pts
@@ -1275,8 +1356,8 @@ export default function Repositories({
                       padding: "12px 14px",
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: "700", color: "var(--ok, #059669)", fontSize: "12.5px" }}>
-                          📈 Commit Velocity (40% weight)
+                        <span style={{ ...metaItem, fontWeight: "700", color: "var(--ok, #059669)", fontSize: "12.5px" }}>
+                          <TrendUp size={14} weight="bold" /> Commit Velocity (40% weight)
                         </span>
                         <span style={{ fontWeight: "800", color: "var(--ok, #059669)", fontSize: "13px" }}>
                           {b.frequencyPts} / 40 pts
@@ -1298,8 +1379,8 @@ export default function Repositories({
                       padding: "12px 14px",
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: "700", color: "#7c3aed", fontSize: "12.5px" }}>
-                          👥 Team Contributors
+                        <span style={{ ...metaItem, fontWeight: "700", color: "#7c3aed", fontSize: "12.5px" }}>
+                          <Users size={14} weight="bold" /> Team Contributors
                         </span>
                         <span style={{ fontWeight: "800", color: "#7c3aed", fontSize: "13px" }}>
                           {b.authors} {b.authors === 1 ? "author" : "authors"}

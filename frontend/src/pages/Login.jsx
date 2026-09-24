@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useAuth } from "../auth.jsx";
-import logo from "../assets/logo.jpeg";
+import logo from "../assets/logo.png";
+import { Lightbulb, Key } from "@phosphor-icons/react";
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -51,7 +52,8 @@ export default function Login() {
           marginBottom: "16px",
           textAlign: "left"
         }}>
-          💡 <b>First time?</b> Enter your email and chosen password (min. 6 characters) to automatically initialize your user account.
+          <Lightbulb size={14} weight="fill" color="#f59e0b" style={{ verticalAlign: "-2px", marginRight: 4 }} />
+          <b>First time?</b> Enter your email and chosen password (min. 6 characters) to automatically initialize your user account.
         </div>
 
         <div className="tc-field">
@@ -90,14 +92,14 @@ export default function Login() {
           <button
             type="button"
             className="action-btn"
-            style={{ width: "100%", fontSize: "12px", minHeight: "34px", opacity: 0.85 }}
+            style={{ width: "100%", fontSize: "12px", minHeight: "34px", opacity: 0.85, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
             onClick={() => {
               setEmail("admin@yourcompany.com");
               setPassword("admin123");
               setError("");
             }}
           >
-            🔑 Fill Default Admin Credentials
+            <Key size={14} /> Fill Default Admin Credentials
           </button>
         </div>
       </form>

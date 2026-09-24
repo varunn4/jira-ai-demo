@@ -1,5 +1,29 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
+import { GithubLogo } from "@phosphor-icons/react";
+import { Button } from "./ui/button";
+import {
+  Settings,
+  X,
+  Ticket,
+  Brain,
+  MessageSquare,
+  CheckCircle2,
+  XCircle,
+  Check,
+  Building2,
+  Link2,
+  Lock,
+  Search,
+  Zap,
+  FolderGit2,
+  Bot,
+  Sparkles,
+  Cpu,
+  FlaskConical,
+  Save,
+  ExternalLink,
+} from "lucide-react";
 
 export default function SettingsModal({ isOpen, onClose, onSaved }) {
   const [activeTab, setActiveTab] = useState("repos");
@@ -383,47 +407,51 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
         {/* Modal Header */}
         <div className="modal-header">
           <div>
-            <h2 className="modal-title">⚙️ System Configuration</h2>
+            <h2 className="modal-title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <Settings size={20} /> System Configuration
+            </h2>
             <p className="modal-subtitle">
               Manage GitHub repositories, Jira credentials, and AI inference models.
             </p>
           </div>
-          <button className="modal-close-btn" onClick={onClose}>
-            ✕
+          <button className="modal-close-btn" onClick={onClose} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={16} />
           </button>
         </div>
 
         {/* Navigation Tabs */}
         <div className="modal-tabs">
           <button
+            type="button"
             className={`modal-tab-btn ${activeTab === "repos" ? "active" : ""}`}
             onClick={() => setActiveTab("repos")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            🐙 GitHub Repos
+            <GithubLogo size={16} weight="bold" /> GitHub Repos
           </button>
           <button
+            type="button"
             className={`modal-tab-btn ${activeTab === "jira" ? "active" : ""}`}
             onClick={() => setActiveTab("jira")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            🎫 Jira Cloud
+            <Ticket size={16} /> Jira Cloud
           </button>
-          {/* <button
-            className={`modal-tab-btn ${activeTab === "zoho" ? "active" : ""}`}
-            onClick={() => setActiveTab("zoho")}
-          >
-            🎟️ Zoho Desk
-          </button> */}
           <button
+            type="button"
             className={`modal-tab-btn ${activeTab === "llm" ? "active" : ""}`}
             onClick={() => setActiveTab("llm")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            🧠 AI / LLM
+            <Brain size={16} /> AI / LLM
           </button>
           <button
+            type="button"
             className={`modal-tab-btn ${activeTab === "integrations" ? "active" : ""}`}
             onClick={() => setActiveTab("integrations")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            💬 Slack Integration
+            <MessageSquare size={16} /> Slack Integration
           </button>
         </div>
 
@@ -435,32 +463,47 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
             </div>
           ) : (
             <>
-              {saveSuccess && <div className="callout callout-success">✅ {saveSuccess}</div>}
-              {saveError && <div className="callout callout-danger">❌ {saveError}</div>}
+              {saveSuccess && (
+                <div className="callout callout-success" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <CheckCircle2 size={16} /> {saveSuccess}
+                </div>
+              )}
+              {saveError && (
+                <div className="callout callout-danger" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <XCircle size={16} /> {saveError}
+                </div>
+              )}
 
               {/* TAB: Repositories */}
               {activeTab === "repos" && (
                 <div className="settings-section">
                   <div className="callout callout-info">
-                    <strong>🐙 GitHub Ingestion:</strong> Connect your GitHub organization or specific repository URLs. Repositories are automatically cloned into the managed workspace for graph analysis and ticket tracing.
+                    <strong style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <GithubLogo size={16} weight="bold" /> GitHub Ingestion:
+                    </strong>{" "}
+                    Connect your GitHub organization or specific repository URLs. Repositories are automatically cloned into the managed workspace for graph analysis and ticket tracing.
                   </div>
 
                   {/* Mode Toggle */}
                   <div className="github-mode-toggle" style={{ marginTop: "14px" }}>
-                    <button
+                    <Button
                       type="button"
-                      className={`github-mode-btn ${formData.github_source_type === "org" ? "active" : ""}`}
+                      variant="segmented"
+                      active={formData.github_source_type === "org"}
+                      icon={Building2}
                       onClick={() => handleChange("github_source_type", "org")}
                     >
-                      🏢 GitHub Organization / Account
-                    </button>
-                    <button
+                      GitHub Organization / Account
+                    </Button>
+                    <Button
                       type="button"
-                      className={`github-mode-btn ${formData.github_source_type === "urls" ? "active" : ""}`}
+                      variant="segmented"
+                      active={formData.github_source_type === "urls"}
+                      icon={Link2}
                       onClick={() => handleChange("github_source_type", "urls")}
                     >
-                      🔗 Specific Repository URLs
-                    </button>
+                      Specific Repository URLs
+                    </Button>
                   </div>
 
                   {formData.github_source_type === "org" ? (
@@ -497,7 +540,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     <label className="field-label">GitHub Personal Access Token (PAT)</label>
                     {meta.github_has_token && !editSecrets.github_token ? (
                       <div className="secret-saved-row">
-                        <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
+                        <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                          <Lock size={12} /> Token configured in database (Masked)
+                        </span>
                         <button
                           type="button"
                           className="btn-text-action"
@@ -522,15 +567,17 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   </div>
 
                   <div style={{ marginTop: "14px" }}>
-                    <button
+                    <Button
                       type="button"
-                      className="btn-primary"
-                      style={{ width: "auto", padding: "8px 20px" }}
+                      variant="primary"
                       onClick={handleValidateGithub}
+                      loading={validatingRepo}
+                      loadingText="Syncing Repositories from GitHub..."
+                      icon={Search}
                       disabled={validatingRepo}
                     >
-                      {validatingRepo ? "⚡ Syncing Repositories from GitHub..." : "⚡ Sync Repositories from GitHub"}
-                    </button>
+                      Sync Repositories from GitHub
+                    </Button>
                   </div>
 
                   {repoValidation && (
@@ -544,17 +591,21 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       {repoValidation.valid && repoValidation.repo_count > 0 ? (
                         <div>
-                          <div className="box-title">
-                            ✅ Active Repositories ({repoValidation.repo_count})
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <CheckCircle2 size={16} color="var(--ok)" /> Active Repositories ({repoValidation.repo_count})
                           </div>
                           <div className="github-repo-card-grid">
                             {repoValidation.repos.map((name) => (
                               <div key={name} className="github-repo-card">
                                 <div className="github-repo-card-head">
-                                  <span className="github-repo-card-name" title={name}>📦 {name}</span>
+                                  <span className="github-repo-card-name" title={name} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                    <FolderGit2 size={14} /> {name}
+                                  </span>
                                 </div>
                                 <div className="github-repo-card-badges">
-                                  <span className="github-badge-status">✓ Ready</span>
+                                  <span className="github-badge-status" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                    <Check size={11} strokeWidth={2.5} /> Ready
+                                  </span>
                                   <span className="github-badge-branch">main</span>
                                 </div>
                               </div>
@@ -564,14 +615,16 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       ) : (
                         <div>
                           <div className="box-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                            <span>❌ GitHub Sync Error</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <XCircle size={16} color="var(--danger)" /> GitHub Sync Error
+                            </span>
                             <a
                               href="https://github.com/settings/tokens"
                               target="_blank"
                               rel="noreferrer"
-                              style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline" }}
+                              style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline", display: "inline-flex", alignItems: "center", gap: 4 }}
                             >
-                              Open GitHub Tokens ↗
+                              Open GitHub Tokens <ExternalLink size={12} />
                             </a>
                           </div>
                           <div className="box-sub" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 6, fontSize: "12.5px" }}>
@@ -607,7 +660,8 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       rel="noreferrer"
                       className="link-highlight"
                     >
-                      Atlassian Security Settings ↗
+                      Atlassian Security Settings{" "}
+                      <ExternalLink size={12} style={{ display: "inline", verticalAlign: "-1px" }} />
                     </a>
                     .
                   </div>
@@ -645,7 +699,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     <label className="field-label">Jira API Token</label>
                     {meta.jira_has_token && !editSecrets.jira_api_token ? (
                       <div className="secret-saved-row">
-                        <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
+                        <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                          <Lock size={12} /> Token configured in database (Masked)
+                        </span>
                         <button
                           type="button"
                           className="btn-text-action"
@@ -699,14 +755,18 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   </div>
 
                   <div style={{ marginTop: "12px" }}>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
                       className="action-btn"
                       onClick={handleTestJira}
+                      loading={testingJira}
+                      loadingText="Testing..."
+                      icon={Zap}
                       disabled={testingJira}
                     >
-                      {testingJira ? "Testing..." : "⚡ Test Jira Connection"}
-                    </button>
+                      Test Jira Connection
+                    </Button>
                   </div>
 
                   {jiraTestResult && (
@@ -716,14 +776,18 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       {jiraTestResult.success ? (
                         <div>
-                          <div className="box-title">✅ Jira Connection Active</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <CheckCircle2 size={16} color="var(--ok)" /> Jira Connection Active
+                          </div>
                           <div className="box-sub">
                             Connected as: <strong>{jiraTestResult.display_name}</strong> ({jiraTestResult.email})
                           </div>
                         </div>
                       ) : (
                         <div>
-                          <div className="box-title">❌ Jira Connection Failed</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <XCircle size={16} color="var(--danger)" /> Jira Connection Failed
+                          </div>
                           <div className="box-sub">{jiraTestResult.error}</div>
                         </div>
                       )}
@@ -731,15 +795,6 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   )}
                 </div>
               )}
-
-              {/* TAB: Zoho Desk (Commented out)
-              {activeTab === "zoho" && (
-                <div className="settings-section">
-                  <div className="callout callout-info">
-                    <strong>🎟️ Zoho Desk OAuth 2.0 Integration:</strong> Connect to Zoho Desk to look up customer tickets, conversations, and statuses directly within the platform.
-                  </div>
-                </div>
-              )} */}
 
               {/* TAB: AI / LLM */}
               {activeTab === "llm" && (
@@ -751,7 +806,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       <input type="radio" checked={formData.llm_provider === "groq"} readOnly />
                       <div className="provider-info">
-                        <span className="provider-name">⚡ Groq (Fast & Free)</span>
+                        <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Zap size={14} /> Groq (Fast & Free)
+                        </span>
                       </div>
                     </label>
 
@@ -769,7 +826,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         readOnly
                       />
                       <div className="provider-info">
-                        <span className="provider-name">🤖 OpenAI</span>
+                        <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Bot size={14} /> OpenAI
+                        </span>
                       </div>
                     </label>
 
@@ -787,7 +846,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         readOnly
                       />
                       <div className="provider-info">
-                        <span className="provider-name">✨ Google Gemini</span>
+                        <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Sparkles size={14} /> Google Gemini
+                        </span>
                       </div>
                     </label>
 
@@ -797,7 +858,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       <input type="radio" checked={formData.llm_provider === "anthropic"} readOnly />
                       <div className="provider-info">
-                        <span className="provider-name">🔮 Anthropic Claude</span>
+                        <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Cpu size={14} /> Anthropic Claude
+                        </span>
                       </div>
                     </label>
 
@@ -807,7 +870,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       <input type="radio" checked={formData.llm_provider === "mock"} readOnly />
                       <div className="provider-info">
-                        <span className="provider-name">🧪 Offline Mock</span>
+                        <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <FlaskConical size={14} /> Offline Mock
+                        </span>
                       </div>
                     </label>
                   </div>
@@ -818,7 +883,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                         <label className="field-label">Anthropic API Key</label>
                         {meta.anthropic_has_key && !editSecrets.anthropic_api_key ? (
                           <div className="secret-saved-row">
-                            <span className="secret-indicator">🔒 Key configured in database (Masked)</span>
+                            <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                              <Lock size={12} /> Key configured in database (Masked)
+                            </span>
                             <button
                               type="button"
                               className="btn-text-action"
@@ -866,7 +933,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                           </label>
                           {meta.openai_has_key && !editSecrets.openai_api_key ? (
                             <div className="secret-saved-row">
-                              <span className="secret-indicator">🔒 Key configured in database (Masked)</span>
+                              <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                <Lock size={12} /> Key configured in database (Masked)
+                              </span>
                               <button
                                 type="button"
                                 className="btn-text-action"
@@ -928,14 +997,18 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   )}
 
                   <div style={{ marginTop: "12px" }}>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
                       className="action-btn"
                       onClick={handleTestLlm}
+                      loading={testingLlm}
+                      loadingText="Testing AI..."
+                      icon={Bot}
                       disabled={testingLlm}
                     >
-                      {testingLlm ? "Testing AI..." : "🤖 Test AI Connection"}
-                    </button>
+                      Test AI Connection
+                    </Button>
                   </div>
 
                   {llmTestResult && (
@@ -945,14 +1018,18 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       {llmTestResult.success ? (
                         <div>
-                          <div className="box-title">✅ AI Inference Active</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <CheckCircle2 size={16} color="var(--ok)" /> AI Inference Active
+                          </div>
                           <div className="box-sub">
                             Model: <code>{llmTestResult.model}</code> | Response: "{llmTestResult.reply}"
                           </div>
                         </div>
                       ) : (
                         <div>
-                          <div className="box-title">❌ AI Test Failed</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <XCircle size={16} color="var(--danger)" /> AI Test Failed
+                          </div>
                           <div className="box-sub">{llmTestResult.error}</div>
                         </div>
                       )}
@@ -969,7 +1046,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       <label className="field-label">Slack Bot Token</label>
                       {meta.slack_has_token && !editSecrets.slack_bot_token ? (
                         <div className="secret-saved-row">
-                          <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
+                          <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                            <Lock size={12} /> Token configured in database (Masked)
+                          </span>
                           <button
                             type="button"
                             className="btn-text-action"
@@ -1007,14 +1086,18 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   </div>
 
                   <div style={{ marginTop: "12px" }}>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
                       className="action-btn"
                       onClick={handleTestSlack}
+                      loading={testingSlack}
+                      loadingText="Testing Slack..."
+                      icon={MessageSquare}
                       disabled={testingSlack}
                     >
-                      {testingSlack ? "Testing Slack..." : "⚡ Test Slack Bot Ping"}
-                    </button>
+                      Test Slack Bot Ping
+                    </Button>
                   </div>
 
                   {slackTestResult && (
@@ -1024,12 +1107,16 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     >
                       {slackTestResult.success ? (
                         <div>
-                          <div className="box-title">✅ Slack Connection Verified!</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <CheckCircle2 size={16} color="var(--ok)" /> Slack Connection Verified!
+                          </div>
                           <div className="box-sub">{slackTestResult.message}</div>
                         </div>
                       ) : (
                         <div>
-                          <div className="box-title">❌ Slack Test Failed</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <XCircle size={16} color="var(--danger)" /> Slack Test Failed
+                          </div>
                           <div className="box-sub">{slackTestResult.error}</div>
                         </div>
                       )}
@@ -1037,7 +1124,10 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   )}
 
                   <div className="callout callout-info" style={{ marginTop: "14px" }}>
-                    <strong>💬 Slack Bot Integration:</strong> Alerts, reviews, and autonomous approvals are dispatched directly to your Slack channel. Replying in threads allows interactive requirement refinement.
+                    <strong style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <MessageSquare size={16} /> Slack Bot Integration:
+                    </strong>{" "}
+                    Alerts, reviews, and autonomous approvals are dispatched directly to your Slack channel. Replying in threads allows interactive requirement refinement.
                   </div>
                 </div>
               )}
@@ -1047,12 +1137,19 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
         {/* Modal Footer */}
         <div className="modal-footer">
-          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             Cancel
-          </button>
-          <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving Changes..." : "💾 Save Settings"}
-          </button>
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleSave}
+            loading={saving}
+            loadingText="Saving Changes..."
+            icon={Save}
+          >
+            Save Settings
+          </Button>
         </div>
       </div>
     </div>

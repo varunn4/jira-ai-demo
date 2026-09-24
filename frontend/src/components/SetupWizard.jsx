@@ -1,5 +1,89 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
+import { GithubLogo } from "@phosphor-icons/react";
+import { Button } from "./ui/button";
+import {
+  Check,
+  Building2,
+  Link2,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Loader2,
+  Search,
+  CheckCircle2,
+  FolderGit2,
+  XCircle,
+  Ticket,
+  KeyRound,
+  Zap,
+  Brain,
+  Bot,
+  Sparkles,
+  Cpu,
+  FlaskConical,
+  Rocket,
+  Mail,
+  Settings,
+  ArrowLeft,
+  ArrowRight,
+  AlertCircle,
+} from "lucide-react";
+
+const AI_PROVIDERS = [
+  {
+    id: "groq",
+    tabLabel: "Groq",
+    title: "Groq (Recommended - Free & Fast)",
+    desc: "Ultra-fast inference with Llama 3 / GPT-OSS models via Groq Cloud.",
+    icon: Zap,
+    badge: "Free & Fast",
+    keyPlaceholder: "gsk_...",
+    keyLabel: "Groq API Key",
+    keyLink: "https://console.groq.com/keys",
+  },
+  {
+    id: "openai",
+    tabLabel: "OpenAI",
+    title: "OpenAI (Official)",
+    desc: "GPT-4o, GPT-4o-mini via official OpenAI API.",
+    icon: Bot,
+    badge: "Official",
+    keyPlaceholder: "sk-proj-...",
+    keyLabel: "OpenAI API Key",
+    keyLink: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "gemini",
+    tabLabel: "Gemini",
+    title: "Google Gemini (Free Tier)",
+    desc: "Gemini 2.5 Flash via AI Studio OpenAI compatibility.",
+    icon: Sparkles,
+    badge: "Free Tier",
+    keyPlaceholder: "AIzaSy...",
+    keyLabel: "Google Gemini API Key",
+    keyLink: "https://aistudio.google.com/app/apikey",
+  },
+  {
+    id: "anthropic",
+    tabLabel: "Claude",
+    title: "Anthropic Claude",
+    desc: "Claude 3.5 Sonnet / Claude 3.5 Haiku via Anthropic API.",
+    icon: Cpu,
+    badge: "Anthropic",
+    keyPlaceholder: "sk-ant-api03-...",
+    keyLabel: "Anthropic API Key",
+    keyLink: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    id: "mock",
+    tabLabel: "Offline Mock",
+    title: "Offline Mock (Zero Cost)",
+    desc: "Simulated responses without any external API keys or cloud egress.",
+    icon: FlaskConical,
+    badge: "Zero Cost",
+  },
+];
 
 export default function SetupWizard({ onComplete }) {
   const [step, setStep] = useState(1);
@@ -26,6 +110,8 @@ export default function SetupWizard({ onComplete }) {
   });
 
   const [showToken, setShowToken] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [showAdvancedLlm, setShowAdvancedLlm] = useState(false);
 
   // Validation / Test States
   const [repoValidation, setRepoValidation] = useState(null); // { valid, repo_count, repos, cloned_details, message, error }
@@ -114,10 +200,13 @@ export default function SetupWizard({ onComplete }) {
     setLlmTestResult(null);
   };
 
+  const [autoAdvancing, setAutoAdvancing] = useState(false);
+
   // 1. Validate & Sync GitHub Repositories
   async function handleValidateGithub() {
     setValidatingRepo(true);
     setRepoValidation(null);
+    setAutoAdvancing(false);
     try {
       const res = await apiFetch("/api/settings/validate-github", {
         method: "POST",
@@ -129,6 +218,13 @@ export default function SetupWizard({ onComplete }) {
         },
       });
       setRepoValidation(res);
+      if (res && res.valid && res.repo_count > 0) {
+        setAutoAdvancing(true);
+        setTimeout(() => {
+          setStep(2);
+          setAutoAdvancing(false);
+        }, 900);
+      }
     } catch (err) {
       setRepoValidation({ valid: false, error: err.message, repo_count: 0, repos: [] });
     } finally {
@@ -218,12 +314,19 @@ export default function SetupWizard({ onComplete }) {
     formData.jira_api_token.trim()
   );
 
+  const activeAiProvider =
+    formData.llm_provider === "openai" && formData.openai_base_url?.includes("google")
+      ? "gemini"
+      : formData.llm_provider;
+
+  const currentProvider =
+    AI_PROVIDERS.find((p) => p.id === activeAiProvider) || AI_PROVIDERS[0];
+  const CurrentProviderIcon = currentProvider.icon;
+
   const isStep3Valid = (() => {
-    if (formData.llm_provider === "anthropic") return Boolean(formData.anthropic_api_key.trim());
-    if (formData.llm_provider === "openai" || formData.llm_provider === "groq" || formData.llm_provider === "gemini") {
-      return Boolean(formData.openai_api_key.trim());
-    }
-    return true;
+    if (activeAiProvider === "anthropic") return Boolean(formData.anthropic_api_key?.trim());
+    if (activeAiProvider === "mock") return true;
+    return Boolean(formData.openai_api_key?.trim());
   })();
 
   const canContinue = (() => {
@@ -238,14 +341,14 @@ export default function SetupWizard({ onComplete }) {
       <div className="wizard-card">
         {/* Wizard Header */}
         <div className="wizard-header">
-          <div className="wizard-title-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div className="wizard-title-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <span className="wizard-badge" style={{ background: "rgba(99, 102, 241, 0.2)", color: "#818cf8", border: "1px solid rgba(99, 102, 241, 0.3)" }}>
+              <span className="wizard-badge" style={{ marginBottom: "5px" }}>
                 Mandatory Initial Setup
               </span>
               <h2 className="wizard-title">Connect Your Workspace</h2>
             </div>
-            <div style={{ fontSize: "11.5px", color: "var(--muted)", fontWeight: 600, background: "var(--surface-2)", padding: "4px 10px", borderRadius: "12px" }}>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 600, background: "var(--secondary)", padding: "3px 8px", borderRadius: "var(--r-pill)" }}>
               Step {step} of {totalSteps}
             </div>
           </div>
@@ -256,22 +359,22 @@ export default function SetupWizard({ onComplete }) {
           {/* Stepper Indicator */}
           <div className="stepper-bar">
             <div className={`step-item ${step >= 1 ? "active" : ""} ${step > 1 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 1 ? "✓" : "1"}</div>
+              <div className="step-circle">{step > 1 ? <Check size={14} strokeWidth={2.5} /> : "1"}</div>
               <span className="step-label">GitHub Repos</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 2 ? "active" : ""} ${step > 2 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 2 ? "✓" : "2"}</div>
+              <div className="step-circle">{step > 2 ? <Check size={14} strokeWidth={2.5} /> : "2"}</div>
               <span className="step-label">Jira Cloud</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 3 ? "active" : ""} ${step > 3 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 3 ? "✓" : "3"}</div>
+              <div className="step-circle">{step > 3 ? <Check size={14} strokeWidth={2.5} /> : "3"}</div>
               <span className="step-label">AI Engine</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 4 ? "active" : ""} ${step > 4 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 4 ? "✓" : "4"}</div>
+              <div className="step-circle">{step > 4 ? <Check size={14} strokeWidth={2.5} /> : "4"}</div>
               <span className="step-label">Finish</span>
             </div>
           </div>
@@ -285,7 +388,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 1 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🐙</span>
+                <span className="step-icon">
+                  <GithubLogo size={20} weight="bold" />
+                </span>
                 <div>
                   <h3 className="step-heading">GitHub Repositories Integration</h3>
                   <p className="step-desc">
@@ -296,20 +401,24 @@ export default function SetupWizard({ onComplete }) {
 
               {/* Source Mode Toggle */}
               <div className="github-mode-toggle">
-                <button
+                <Button
                   type="button"
-                  className={`github-mode-btn ${formData.github_source_type === "org" ? "active" : ""}`}
+                  variant="segmented"
+                  active={formData.github_source_type === "org"}
+                  icon={Building2}
                   onClick={() => handleChange("github_source_type", "org")}
                 >
-                  🏢 GitHub Organization / User
-                </button>
-                <button
+                  GitHub Organization / User
+                </Button>
+                <Button
                   type="button"
-                  className={`github-mode-btn ${formData.github_source_type === "urls" ? "active" : ""}`}
+                  variant="segmented"
+                  active={formData.github_source_type === "urls"}
+                  icon={Link2}
                   onClick={() => handleChange("github_source_type", "urls")}
                 >
-                  🔗 Specific Repository URLs
-                </button>
+                  Specific Repository URLs
+                </Button>
               </div>
 
               {formData.github_source_type === "org" ? (
@@ -341,7 +450,7 @@ export default function SetupWizard({ onComplete }) {
                     autoComplete="off"
                     data-lpignore="true"
                     className="field-input"
-                    style={{ minHeight: "80px", resize: "vertical", marginTop: "4px" }}
+                    style={{ minHeight: "64px", resize: "vertical", marginTop: "3px" }}
                     placeholder="e.g.&#10;https://github.com/AonamiTech/trail-main&#10;https://github.com/org/backend-service&#10;or org/repo"
                     value={formData.github_repo_urls}
                     onChange={(e) => handleChange("github_repo_urls", e.target.value)}
@@ -353,21 +462,21 @@ export default function SetupWizard({ onComplete }) {
               )}
 
               {/* Personal Access Token (PAT) Input */}
-              <div className="form-group" style={{ marginTop: "14px" }}>
+              <div className="form-group" style={{ marginTop: "10px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <label className="field-label" style={{ marginBottom: 0 }}>
-                    GitHub Personal Access Token (PAT) <span style={{ fontWeight: 400, color: "var(--muted)" }}>(Optional for public repos)</span>
+                    GitHub Personal Access Token (PAT) <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>(Optional for public repos)</span>
                   </label>
                   <a
                     href="https://github.com/settings/tokens"
                     target="_blank"
                     rel="noreferrer"
-                    style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650 }}
+                    style={{ fontSize: "11px", color: "var(--accent-strong)", fontWeight: 650, display: "inline-flex", alignItems: "center", gap: "4px" }}
                   >
-                    Generate GitHub Token ↗
+                    Generate GitHub Token <ExternalLink size={11} />
                   </a>
                 </div>
-                <div className="input-with-action" style={{ marginTop: "4px" }}>
+                <div className="input-with-action" style={{ marginTop: "3px" }}>
                   <input
                     type={showToken ? "text" : "password"}
                     name="gh_pat_token_secret"
@@ -378,14 +487,16 @@ export default function SetupWizard({ onComplete }) {
                     value={formData.github_token}
                     onChange={(e) => handleChange("github_token", e.target.value)}
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     className="action-btn"
+                    icon={showToken ? EyeOff : Eye}
                     onClick={() => setShowToken(!showToken)}
-                    style={{ minWidth: "70px" }}
+                    style={{ minWidth: "72px" }}
                   >
-                    {showToken ? "🙈 Hide" : "👁️ Show"}
-                  </button>
+                    {showToken ? "Hide" : "Show"}
+                  </Button>
                 </div>
                 <span className="field-hint">
                   Required for <strong>private repositories</strong> and to prevent GitHub API rate limits. Token requires standard <code>repo</code> scope.
@@ -393,70 +504,89 @@ export default function SetupWizard({ onComplete }) {
               </div>
 
               {/* Action Button */}
-              <div style={{ marginTop: "18px" }}>
-                <button
+              <div style={{ marginTop: "12px" }}>
+                <Button
                   type="button"
-                  className="btn-primary"
-                  style={{ width: "100%", minHeight: "42px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                  variant="primary"
+                  className={autoAdvancing ? "" : "btn-primary"}
+                  style={{
+                    width: "100%",
+                    minHeight: "38px",
+                    background: autoAdvancing ? "linear-gradient(135deg, #059669 0%, #10b981 100%)" : undefined,
+                    boxShadow: autoAdvancing ? "0 4px 12px -2px rgba(16, 185, 129, 0.4)" : undefined,
+                  }}
                   onClick={handleValidateGithub}
+                  loading={validatingRepo}
+                  loadingText="Connecting & Syncing Repositories from GitHub..."
+                  icon={autoAdvancing ? CheckCircle2 : Search}
                   disabled={
                     validatingRepo ||
+                    autoAdvancing ||
                     (formData.github_source_type === "org"
                       ? !formData.github_org_or_user.trim()
                       : !formData.github_repo_urls.trim())
                   }
                 >
-                  {validatingRepo ? "⚡ Connecting & Syncing Repositories from GitHub..." : "🔍 Authenticate & Sync Repositories"}
-                </button>
+                  {autoAdvancing
+                    ? <><Check size={14} strokeWidth={2.5} /> Synced! Moving to Step 2...</>
+                    : isStep1Valid
+                    ? "Re-sync Repositories"
+                    : "Authenticate & Sync Repositories"}
+                </Button>
               </div>
 
-              {/* Sync Results */}
+              {/* Compact Sync Feedback */}
               {repoValidation && (
-                <div
-                  className={`validation-box ${
-                    repoValidation.valid && repoValidation.repo_count > 0
-                      ? "box-success"
-                      : "box-danger"
-                  }`}
-                  style={{ marginTop: "16px" }}
-                >
+                <div>
                   {repoValidation.valid && repoValidation.repo_count > 0 ? (
-                    <div>
-                      <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        ✅ Successfully Connected & Synced {repoValidation.repo_count} Repository(ies)
+                    <div
+                      style={{
+                        marginTop: "10px",
+                        padding: "8px 12px",
+                        background: "rgba(16, 185, 129, 0.08)",
+                        border: "1px solid rgba(16, 185, 129, 0.22)",
+                        borderRadius: "8px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "8px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <CheckCircle2 size={15} color="#10b981" style={{ flexShrink: 0 }} />
+                        <span style={{ fontSize: "12px", fontWeight: 650, color: "#065f46", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          Synced {repoValidation.repo_count} repository: {repoValidation.repos?.join(", ")}
+                        </span>
                       </div>
-                      <div className="box-sub" style={{ marginBottom: "8px" }}>
-                        {repoValidation.message || "All repositories are ready and available in the server workspace for graph analysis."}
-                      </div>
-                      <div className="github-repo-card-grid">
-                        {repoValidation.repos.map((name) => (
-                          <div key={name} className="github-repo-card">
-                            <div className="github-repo-card-head">
-                              <span className="github-repo-card-name" title={name}>📦 {name}</span>
-                            </div>
-                            <div className="github-repo-card-badges">
-                              <span className="github-badge-status">✓ Ready</span>
-                              <span className="github-badge-branch">main</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <span style={{ fontSize: "10px", color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "1.5px 6px", borderRadius: "999px", fontWeight: 700, flexShrink: 0 }}>
+                        Ready
+                      </span>
                     </div>
                   ) : (
-                    <div>
-                      <div className="box-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span>❌ GitHub Connection / Sync Failed</span>
+                    <div
+                      style={{
+                        marginTop: "10px",
+                        padding: "10px 14px",
+                        background: "rgba(239, 68, 68, 0.08)",
+                        border: "1px solid rgba(239, 68, 68, 0.22)",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 650, color: "#b91c1c", fontSize: "12px" }}>
+                          <XCircle size={14} color="#ef4444" /> GitHub Connection Failed
+                        </span>
                         <a
                           href="https://github.com/settings/tokens"
                           target="_blank"
                           rel="noreferrer"
-                          style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline" }}
+                          style={{ fontSize: "11px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline", display: "inline-flex", alignItems: "center", gap: 3 }}
                         >
-                          Open GitHub Tokens ↗
+                          Open GitHub Tokens <ExternalLink size={11} />
                         </a>
                       </div>
-                      <div className="box-sub" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 6, fontSize: "12.5px" }}>
-                        {repoValidation.error || "Unable to find or clone repositories from GitHub. Please check the organization name, repository URL, or provide a GitHub Personal Access Token."}
+                      <div style={{ fontSize: "11.5px", color: "var(--ink-soft)", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>
+                        {repoValidation.error || "Unable to clone repositories. Please verify URL or Personal Access Token."}
                       </div>
                     </div>
                   )}
@@ -469,7 +599,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 2 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🎫</span>
+                <span className="step-icon">
+                  <Ticket size={20} />
+                </span>
                 <div>
                   <h3 className="step-heading">Jira Cloud Integration</h3>
                   <p className="step-desc">
@@ -479,14 +611,18 @@ export default function SetupWizard({ onComplete }) {
               </div>
 
               <div className="callout callout-info">
-                <strong>🔑 How to get your Jira API Token:</strong> Log in to your Atlassian account, go to{" "}
+                <strong style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <KeyRound size={15} /> How to get your Jira API Token:
+                </strong>{" "}
+                Log in to your Atlassian account, go to{" "}
                 <a
                   href="https://id.atlassian.com/manage-profile/security/api-tokens"
                   target="_blank"
                   rel="noreferrer"
                   className="link-highlight"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
                 >
-                  Atlassian API Tokens ↗
+                  Atlassian API Tokens <ExternalLink size={11} />
                 </a>
                 , click <em>Create API token</em>, and paste it below.
               </div>
@@ -553,14 +689,18 @@ export default function SetupWizard({ onComplete }) {
               </div>
 
               <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "12px" }}>
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   className="action-btn"
                   onClick={handleTestJira}
+                  loading={testingJira}
+                  loadingText="Connecting to Jira..."
+                  icon={Zap}
                   disabled={testingJira || !formData.jira_base_url || !formData.jira_email || !formData.jira_api_token}
                 >
-                  {testingJira ? "Connecting to Jira..." : "⚡ Test Jira Connection"}
-                </button>
+                  Test Jira Connection
+                </Button>
               </div>
 
               {jiraTestResult && (
@@ -570,14 +710,18 @@ export default function SetupWizard({ onComplete }) {
                 >
                   {jiraTestResult.success ? (
                     <div>
-                      <div className="box-title">✅ Jira Connection Verified!</div>
+                      <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <CheckCircle2 size={16} color="var(--success, #10b981)" /> Jira Connection Verified!
+                      </div>
                       <div className="box-sub">
                         Authenticated as: <strong>{jiraTestResult.display_name}</strong> ({jiraTestResult.email})
                       </div>
                     </div>
                   ) : (
                     <div>
-                      <div className="box-title">❌ Jira Connection Failed</div>
+                      <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <XCircle size={16} color="var(--danger, #ef4444)" /> Jira Connection Failed
+                      </div>
                       <div className="box-sub">{jiraTestResult.error}</div>
                     </div>
                   )}
@@ -590,7 +734,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 3 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🧠</span>
+                <span className="step-icon">
+                  <Brain size={20} />
+                </span>
                 <div>
                   <h3 className="step-heading">AI & LLM Provider</h3>
                   <p className="step-desc">
@@ -599,230 +745,238 @@ export default function SetupWizard({ onComplete }) {
                 </div>
               </div>
 
-              {/* Provider Selection Cards */}
-              <div className="provider-selector">
-                <label
-                  className={`provider-card ${formData.llm_provider === "groq" ? "selected" : ""}`}
-                  onClick={() => handleProviderChange("groq")}
-                >
-                  <input type="radio" name="provider" checked={formData.llm_provider === "groq"} readOnly />
-                  <div className="provider-info">
-                    <span className="provider-name">⚡ Groq (Recommended - Free & Fast)</span>
-                    <span className="provider-desc">Ultra-fast inference with Llama 3 / GPT-OSS models.</span>
+              {/* AI Model Card Matching Drawing */}
+              <div className="ai-model-box">
+                {/* Selected model & description */}
+                <div className="ai-model-header">
+                  <div className="ai-model-title">
+                    <div className="ai-model-title-left">
+                      <CurrentProviderIcon size={18} />
+                      <span>{currentProvider.title}</span>
+                    </div>
+                    {currentProvider.badge && (
+                      <span className="ai-model-badge">{currentProvider.badge}</span>
+                    )}
                   </div>
-                </label>
+                  <p className="ai-model-desc">{currentProvider.desc}</p>
+                </div>
 
-                <label
-                  className={`provider-card ${
-                    formData.llm_provider === "openai" && !formData.openai_base_url.includes("google")
-                      ? "selected"
-                      : ""
-                  }`}
-                  onClick={() => handleProviderChange("openai")}
-                >
-                  <input
-                    type="radio"
-                    name="provider"
-                    checked={formData.llm_provider === "openai" && !formData.openai_base_url.includes("google")}
-                    readOnly
-                  />
-                  <div className="provider-info">
-                    <span className="provider-name">🤖 OpenAI (Official)</span>
-                    <span className="provider-desc">GPT-4o, GPT-4o-mini via OpenAI API.</span>
-                  </div>
-                </label>
+                {/* Tabs to switch into models */}
+                <div className="ai-model-tabs">
+                  {AI_PROVIDERS.map((prov) => {
+                    const IconComp = prov.icon;
+                    const isSelected = activeAiProvider === prov.id;
+                    return (
+                      <Button
+                        key={prov.id}
+                        type="button"
+                        variant="segmented"
+                        size="sm"
+                        active={isSelected}
+                        icon={IconComp}
+                        onClick={() => handleProviderChange(prov.id)}
+                      >
+                        {prov.tabLabel}
+                      </Button>
+                    );
+                  })}
+                </div>
 
-                <label
-                  className={`provider-card ${
-                    formData.llm_provider === "openai" && formData.openai_base_url.includes("google")
-                      ? "selected"
-                      : ""
-                  }`}
-                  onClick={() => handleProviderChange("gemini")}
-                >
-                  <input
-                    type="radio"
-                    name="provider"
-                    checked={formData.llm_provider === "openai" && formData.openai_base_url.includes("google")}
-                    readOnly
-                  />
-                  <div className="provider-info">
-                    <span className="provider-name">✨ Google Gemini (Free Tier)</span>
-                    <span className="provider-desc">Gemini 2.5 Flash via AI Studio OpenAI compatibility.</span>
-                  </div>
-                </label>
-
-                <label
-                  className={`provider-card ${formData.llm_provider === "anthropic" ? "selected" : ""}`}
-                  onClick={() => handleProviderChange("anthropic")}
-                >
-                  <input type="radio" name="provider" checked={formData.llm_provider === "anthropic"} readOnly />
-                  <div className="provider-info">
-                    <span className="provider-name">🔮 Anthropic Claude</span>
-                    <span className="provider-desc">Claude 3.5 Sonnet / Claude 3.5 Haiku.</span>
-                  </div>
-                </label>
-
-                <label
-                  className={`provider-card ${formData.llm_provider === "mock" ? "selected" : ""}`}
-                  onClick={() => handleProviderChange("mock")}
-                >
-                  <input type="radio" name="provider" checked={formData.llm_provider === "mock"} readOnly />
-                  <div className="provider-info">
-                    <span className="provider-name">🧪 Offline Mock (Zero Cost)</span>
-                    <span className="provider-desc">Simulated responses without any external API keys.</span>
-                  </div>
-                </label>
-              </div>
-
-              {/* Provider Config Inputs */}
-              {formData.llm_provider !== "mock" && (
-                <div style={{ marginTop: "16px" }}>
-                  {formData.llm_provider === "anthropic" ? (
-                    <>
-                      <div className="form-group">
-                        <label className="field-label">
-                          Anthropic API Key <span className="req">*</span>
+                {/* API Key Input & Action Area */}
+                {activeAiProvider !== "mock" ? (
+                  <div className="ai-model-input-area">
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <label className="field-label" style={{ marginBottom: 0 }}>
+                          {currentProvider.keyLabel} <span className="req">*</span>
                         </label>
+                        {currentProvider.keyLink && (
+                          <a
+                            href={currentProvider.keyLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="field-hint"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 3, margin: 0, fontSize: "11.5px" }}
+                          >
+                            Get API key <ExternalLink size={11} />
+                          </a>
+                        )}
+                      </div>
+                      <div className="ai-key-input-row">
                         <input
-                          type="password"
-                          name="ai_anthropic_secret_key"
+                          type={showApiKey ? "text" : "password"}
+                          name="ai_api_key"
                           autoComplete="new-password"
                           data-lpignore="true"
-                          className="field-input"
-                          placeholder="sk-ant-api03-..."
-                          value={formData.anthropic_api_key}
-                          onChange={(e) => handleChange("anthropic_api_key", e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="field-label">Anthropic Model</label>
-                        <input
-                          type="text"
-                          name="ai_anthropic_model_name"
-                          autoComplete="off"
-                          data-lpignore="true"
-                          className="field-input"
-                          placeholder="claude-3-5-sonnet-20241022"
-                          value={formData.anthropic_model}
-                          onChange={(e) => handleChange("anthropic_model", e.target.value)}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="form-group">
-                        <label className="field-label">
-                          {formData.llm_provider === "groq"
-                            ? "Groq API Key"
-                            : formData.openai_base_url.includes("google")
-                            ? "Google Gemini API Key"
-                            : "OpenAI API Key"}{" "}
-                          <span className="req">*</span>
-                        </label>
-                        <input
-                          type="password"
-                          name="ai_generic_secret_key"
-                          autoComplete="new-password"
-                          data-lpignore="true"
-                          className="field-input"
-                          placeholder={
-                            formData.llm_provider === "groq"
-                              ? "gsk_..."
-                              : formData.openai_base_url.includes("google")
-                              ? "AIzaSy..."
-                              : "sk-proj-..."
+                          className="field-input ai-key-input-field"
+                          placeholder={currentProvider.keyPlaceholder}
+                          value={
+                            activeAiProvider === "anthropic"
+                              ? formData.anthropic_api_key
+                              : formData.openai_api_key
                           }
-                          value={formData.openai_api_key}
-                          onChange={(e) => handleChange("openai_api_key", e.target.value)}
+                          onChange={(e) => {
+                            if (activeAiProvider === "anthropic") {
+                              handleChange("anthropic_api_key", e.target.value);
+                            } else {
+                              handleChange("openai_api_key", e.target.value);
+                            }
+                          }}
                         />
-                        {formData.llm_provider === "groq" && (
-                          <span className="field-hint">
-                            Get a free Groq key at{" "}
-                            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">
-                              console.groq.com/keys ↗
-                            </a>
-                          </span>
-                        )}
-                        {formData.openai_base_url.includes("google") && (
-                          <span className="field-hint">
-                            Get a free Gemini API key at{" "}
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">
-                              aistudio.google.com ↗
-                            </a>
-                          </span>
-                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          icon={showApiKey ? EyeOff : Eye}
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          title={showApiKey ? "Hide key" : "Show key"}
+                        >
+                          {showApiKey ? "Hide" : "Show"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="action-btn"
+                          onClick={handleTestLlm}
+                          loading={testingLlm}
+                          loadingText="Testing..."
+                          icon={Bot}
+                          disabled={
+                            testingLlm ||
+                            (activeAiProvider === "anthropic"
+                              ? !formData.anthropic_api_key?.trim()
+                              : !formData.openai_api_key?.trim())
+                          }
+                        >
+                          Test Ping
+                        </Button>
                       </div>
+                    </div>
 
-                      <div className="form-grid-2">
-                        <div className="form-group">
-                          <label className="field-label">Model Identifier</label>
-                          <input
-                            type="text"
-                            name="ai_generic_model_id"
-                            autoComplete="off"
-                            data-lpignore="true"
-                            className="field-input"
-                            value={formData.llm_model}
-                            onChange={(e) => handleChange("llm_model", e.target.value)}
-                          />
-                        </div>
-                        {formData.openai_base_url && (
-                          <div className="form-group">
-                            <label className="field-label">API Base URL</label>
+                    {/* Model settings accordion */}
+                    <div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        icon={Settings}
+                        iconSize={13}
+                        onClick={() => setShowAdvancedLlm(!showAdvancedLlm)}
+                        className="ai-advanced-toggle"
+                      >
+                        {showAdvancedLlm ? "Hide model configuration" : "Customize model identifier & endpoint"}
+                      </Button>
+
+                      {showAdvancedLlm && (
+                        <div
+                          className="form-grid-2"
+                          style={{
+                            marginTop: "8px",
+                            paddingTop: "8px",
+                            borderTop: "1px dashed var(--border)",
+                          }}
+                        >
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="field-label">Model Identifier</label>
                             <input
                               type="text"
-                              name="ai_generic_base_url"
+                              name="ai_custom_model_id"
                               autoComplete="off"
                               data-lpignore="true"
                               className="field-input"
-                              value={formData.openai_base_url}
-                              onChange={(e) => handleChange("openai_base_url", e.target.value)}
+                              value={
+                                activeAiProvider === "anthropic"
+                                  ? formData.anthropic_model
+                                  : formData.llm_model
+                              }
+                              onChange={(e) => {
+                                if (activeAiProvider === "anthropic") {
+                                  handleChange("anthropic_model", e.target.value);
+                                } else {
+                                  handleChange("llm_model", e.target.value);
+                                }
+                              }}
                             />
                           </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  <div style={{ marginTop: "12px" }}>
-                    <button
-                      type="button"
-                      className="action-btn"
-                      onClick={handleTestLlm}
-                      disabled={
-                        testingLlm ||
-                        (formData.llm_provider === "anthropic"
-                          ? !formData.anthropic_api_key
-                          : !formData.openai_api_key)
-                      }
-                    >
-                      {testingLlm ? "Testing AI connection..." : "🤖 Test AI Model Ping"}
-                    </button>
-                  </div>
-
-                  {llmTestResult && (
-                    <div
-                      className={`validation-box ${llmTestResult.success ? "box-success" : "box-danger"}`}
-                      style={{ marginTop: "12px" }}
-                    >
-                      {llmTestResult.success ? (
-                        <div>
-                          <div className="box-title">✅ AI Provider Connected Successfully!</div>
-                          <div className="box-sub">
-                            Model: <code>{llmTestResult.model}</code> | Response: "{llmTestResult.reply}"
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="box-title">❌ AI Connection Failed</div>
-                          <div className="box-sub">{llmTestResult.error}</div>
+                          {activeAiProvider !== "anthropic" && formData.openai_base_url && (
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label className="field-label">API Base URL</label>
+                              <input
+                                type="text"
+                                name="ai_custom_base_url"
+                                autoComplete="off"
+                                data-lpignore="true"
+                                className="field-input"
+                                value={formData.openai_base_url}
+                                onChange={(e) => handleChange("openai_base_url", e.target.value)}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                ) : (
+                  <div className="ai-model-input-area">
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        borderRadius: "var(--radius)",
+                        background: "var(--secondary)",
+                        border: "1px solid var(--border)",
+                        fontSize: "12.5px",
+                        color: "var(--muted-foreground)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <FlaskConical size={16} color="var(--primary)" />
+                        <span>Offline Mock mode active — zero cost simulation, no external API keys required.</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleTestLlm}
+                        loading={testingLlm}
+                        loadingText="Testing..."
+                        icon={Bot}
+                      >
+                        Test Ping
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Ping Result Feedback */}
+                {llmTestResult && (
+                  <div
+                    className={`validation-box ${llmTestResult.success ? "box-success" : "box-danger"}`}
+                    style={{ marginTop: 0 }}
+                  >
+                    {llmTestResult.success ? (
+                      <div>
+                        <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <CheckCircle2 size={15} color="var(--ok, #10b981)" /> AI Provider Connected Successfully!
+                        </div>
+                        <div className="box-sub">
+                          Model: <code>{llmTestResult.model}</code> | Response: "{llmTestResult.reply}"
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <XCircle size={15} color="var(--danger, #ef4444)" /> AI Connection Failed
+                        </div>
+                        <div className="box-sub">{llmTestResult.error}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -830,7 +984,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 4 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🚀</span>
+                <span className="step-icon">
+                  <Rocket size={20} />
+                </span>
                 <div>
                   <h3 className="step-heading">Review & Complete Setup</h3>
                   <p className="step-desc">
@@ -841,7 +997,9 @@ export default function SetupWizard({ onComplete }) {
 
               <div className="summary-card">
                 <div className="summary-row">
-                  <span className="summary-label">🐙 GitHub Source:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <GithubLogo size={16} weight="bold" /> GitHub Source:
+                  </span>
                   <span className="summary-value">
                     {formData.github_source_type === "org"
                       ? `Org / Account: ${formData.github_org_or_user || "Default"}`
@@ -849,21 +1007,29 @@ export default function SetupWizard({ onComplete }) {
                   </span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">📦 Synced Repositories:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <FolderGit2 size={15} /> Synced Repositories:
+                  </span>
                   <span className="summary-value">
                     {repoValidation?.repo_count || 0} repository(ies) active in workspace
                   </span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">🎫 Jira Cloud Workspace:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Ticket size={15} /> Jira Cloud Workspace:
+                  </span>
                   <span className="summary-value">{formData.jira_base_url || "Not configured"}</span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">📧 Jira Account:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Mail size={15} /> Jira Account:
+                  </span>
                   <span className="summary-value">{formData.jira_email || "Not configured"}</span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">🧠 AI Provider:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Brain size={15} /> AI Provider:
+                  </span>
                   <span className="summary-value">
                     <strong>{formData.llm_provider.toUpperCase()}</strong> ({formData.llm_model})
                   </span>
@@ -904,7 +1070,14 @@ export default function SetupWizard({ onComplete }) {
               </div>
 
               <div className="callout callout-info" style={{ marginTop: "16px" }}>
-                <strong>⚙️ Need to change these later?</strong> You can open the Settings menu anytime from the <strong>⚙️ Settings</strong> button in the top navigation bar.
+                <strong style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <Settings size={15} /> Need to change these later?
+                </strong>{" "}
+                You can open the Settings menu anytime from the{" "}
+                <strong style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <Settings size={14} /> Settings
+                </strong>{" "}
+                button in the top navigation bar.
               </div>
             </div>
           )}
@@ -913,14 +1086,16 @@ export default function SetupWizard({ onComplete }) {
         {/* Wizard Footer Navigation */}
         <div className="wizard-footer">
           {step > 1 ? (
-            <button
+            <Button
               type="button"
+              variant="outline"
               className="btn-secondary"
+              icon={ArrowLeft}
               onClick={() => setStep((s) => s - 1)}
               disabled={saving}
             >
-              ← Back
-            </button>
+              Back
+            </Button>
           ) : (
             <div />
           )}
@@ -928,31 +1103,38 @@ export default function SetupWizard({ onComplete }) {
           {step < totalSteps ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {!canContinue && (
-                <span style={{ fontSize: "12px", color: "var(--danger, #f87171)", fontWeight: 600 }}>
-                  {step === 1 && "⚠️ Authenticate & sync at least 1 GitHub repository"}
-                  {step === 2 && "⚠️ Fill Jira URL, Email, and Token to proceed"}
-                  {step === 3 && `⚠️ Enter API Key for ${formData.llm_provider}`}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: "12px", color: "var(--danger, #f87171)", fontWeight: 600 }}>
+                  <AlertCircle size={14} />
+                  {step === 1 && "Authenticate & sync at least 1 GitHub repository"}
+                  {step === 2 && "Fill Jira URL, Email, and Token to proceed"}
+                  {step === 3 && `Enter API Key for ${currentProvider.tabLabel}`}
                 </span>
               )}
-              <button
+              <Button
                 type="button"
+                variant="primary"
                 className="btn-primary"
+                icon={ArrowRight}
+                iconPosition="right"
                 onClick={() => setStep((s) => s + 1)}
                 disabled={!canContinue}
                 style={{ opacity: canContinue ? 1 : 0.5, cursor: canContinue ? "pointer" : "not-allowed" }}
               >
-                Continue to Step {step + 1} →
-              </button>
+                Continue to Step {step + 1}
+              </Button>
             </div>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="default"
               className="btn-primary-finish"
+              icon={Sparkles}
+              loading={saving}
+              loadingText="Saving Configuration..."
               onClick={handleSaveAndFinish}
-              disabled={saving}
             >
-              {saving ? "Saving Configuration..." : "✨ Save & Launch Dashboard"}
-            </button>
+              Save & Launch Dashboard
+            </Button>
           )}
         </div>
       </div>

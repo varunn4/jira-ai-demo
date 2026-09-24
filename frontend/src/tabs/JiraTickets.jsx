@@ -1,14 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch, apiDownload } from "../api";
 import { fmtDate } from "../lib/format";
+import {
+  Target,
+  Flask,
+  FileText,
+  Files,
+  ClipboardText,
+  ArrowsClockwise,
+  FileXls,
+  SpinnerGap,
+  Check,
+  X,
+  CaretUp,
+  CaretDown,
+  MagnifyingGlass,
+} from "@phosphor-icons/react";
 
 const MATCH_FILTERS = [
-  { value: "all", label: "All Tickets" },
-  { value: "matches_only", label: "🎯 Any Requirement" },
-  { value: "test_cases", label: "🧪 Test Cases" },
-  { value: "prd", label: "📄 PRD" },
-  { value: "brd", label: "📑 BRD" },
-  { value: "srs", label: "📋 SRS" },
+  { value: "all", label: "All Tickets", icon: null },
+  { value: "matches_only", label: "Any Requirement", icon: Target },
+  { value: "test_cases", label: "Test Cases", icon: Flask },
+  { value: "prd", label: "PRD", icon: FileText },
+  { value: "brd", label: "BRD", icon: Files },
+  { value: "srs", label: "SRS", icon: ClipboardText },
 ];
 
 const PIPELINE_LIMITS = [
@@ -34,7 +49,7 @@ export default function JiraTickets() {
 
   async function loadData(forceRefresh = false) {
     setLoading(true);
-    setInfo({ msg: forceRefresh ? "🔄 Fetching latest tickets from Jira Cloud..." : "", error: false });
+    setInfo({ msg: forceRefresh ? "Fetching latest tickets from Jira Cloud..." : "", error: false });
     const params = new URLSearchParams({ limit: "500", match_type: "all" });
     if (forceRefresh) params.set("force_refresh", "true");
     const proj = projectKey.trim().toUpperCase();
@@ -54,7 +69,7 @@ export default function JiraTickets() {
       setCounts(data.counts || {});
       setTickets(data.tickets || []);
       if (forceRefresh) {
-        setInfo({ msg: `✓ Synchronized ${data.total_tickets || 0} tickets from Jira Cloud!`, error: false });
+        setInfo({ msg: `Synchronized ${data.total_tickets || 0} tickets from Jira Cloud!`, error: false });
       }
     } catch (err) {
       setInfo({ msg: err.message, error: true });
@@ -120,7 +135,7 @@ export default function JiraTickets() {
       await apiDownload(`/graph-admin/test-case-comparison-report?${params.toString()}`, {
         fallbackName: "jira-test-case-comparison.xlsx",
       });
-      setInfo({ msg: "✓ Excel comparison report downloaded successfully", error: false });
+      setInfo({ msg: "Excel comparison report downloaded successfully", error: false });
     } catch (err) {
       setInfo({ msg: `Download failed: ${err.message}`, error: true });
     } finally {
@@ -223,8 +238,12 @@ export default function JiraTickets() {
                   color: active ? "var(--ink, #0f172a)" : "var(--muted, #64748b)",
                   boxShadow: active ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                   transform: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
                 }}
               >
+                {f.icon && <f.icon size={14} weight={active ? "fill" : "regular"} />}
                 {f.label}{countLabel}
               </button>
             );
@@ -271,7 +290,7 @@ export default function JiraTickets() {
                   boxShadow: "none",
                 }}
               >
-                ✕
+                <X size={12} weight="bold" />
               </button>
             )}
           </div>
@@ -307,9 +326,13 @@ export default function JiraTickets() {
               padding: "0 12px",
               fontSize: 12.5,
               fontWeight: "600",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            🔄 Refresh
+            <ArrowsClockwise size={15} weight="bold" />
+            Refresh
           </button>
 
           {/* Pipeline Limit Dropdown */}
@@ -357,7 +380,17 @@ export default function JiraTickets() {
             }}
             title="Download test case and requirement comparative analysis as Excel (.xlsx)"
           >
-            {downloading ? "⏳ Exporting..." : "📊 Excel Report"}
+            {downloading ? (
+              <>
+                <SpinnerGap size={15} className="animate-spin" />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <FileXls size={15} weight="bold" />
+                Excel Report
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -510,8 +543,9 @@ function CombinedTicketRow({ t }) {
       {/* Test Cases Found */}
       <td style={{ padding: "12px 10px", textAlign: "center" }}>
         {t.has_test_cases ? (
-          <span className="badge ok" style={{ fontSize: 11, padding: "2px 8px" }}>
-            ✓ Found
+          <span className="badge ok" style={{ fontSize: 11, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <Check size={12} weight="bold" />
+            Found
           </span>
         ) : (
           <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
@@ -572,8 +606,9 @@ function CombinedTicketRow({ t }) {
                 transform: "none",
               }}
             >
-              <span>{open ? "▲" : "▼"}</span>
-              <span>🔍 {matches.length} hit{matches.length !== 1 ? "s" : ""}</span>
+              {open ? <CaretUp size={12} weight="bold" /> : <CaretDown size={12} weight="bold" />}
+              <MagnifyingGlass size={13} weight="bold" />
+              <span>{matches.length} hit{matches.length !== 1 ? "s" : ""}</span>
             </button>
 
             {open && (

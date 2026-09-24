@@ -207,7 +207,7 @@ def fetch_github_org_repos(org_or_user: str, token: str = "") -> list[dict[str, 
             if exc.code == 401:
                 raise RuntimeError(
                     "GitHub API 401 Unauthorized: The provided Personal Access Token (PAT) is invalid, expired, or missing permissions.\n\n"
-                    "👉 Resolution:\n"
+                    "Resolution:\n"
                     "1. Visit github.com/settings/tokens to generate a Classic Personal Access Token.\n"
                     "2. Check the 'repo' scope checkbox.\n"
                     "3. Paste the token into the GitHub Token field and retry."
@@ -215,7 +215,7 @@ def fetch_github_org_repos(org_or_user: str, token: str = "") -> list[dict[str, 
             if exc.code == 403:
                 raise RuntimeError(
                     f"GitHub API 403 Forbidden: API rate limit exceeded or access restricted ({exc.reason}).\n\n"
-                    "👉 Resolution:\n"
+                    "Resolution:\n"
                     "Add a GitHub Personal Access Token (PAT) to increase your hourly rate limit from 60 to 5,000 requests/hr and access private repositories."
                 )
             raise RuntimeError(f"GitHub API error ({exc.code}): {exc.reason}")
@@ -224,13 +224,13 @@ def fetch_github_org_repos(org_or_user: str, token: str = "") -> list[dict[str, 
             if "401" in err_str:
                 raise RuntimeError(
                     "GitHub API 401 Unauthorized: The provided Personal Access Token (PAT) is invalid or expired.\n\n"
-                    "👉 Resolution: Generate a new Classic Token with 'repo' scope at github.com/settings/tokens."
+                    "Resolution: Generate a new Classic Token with 'repo' scope at github.com/settings/tokens."
                 )
             raise RuntimeError(f"Failed to connect to GitHub API: {exc}")
 
     raise RuntimeError(
         f"GitHub organization or user '{slug}' not found (or no accessible repositories).\n\n"
-        "👉 Resolution: Verify the handle. If the organization contains only private repositories, provide a GitHub Personal Access Token with 'repo' scope."
+        "Resolution: Verify the handle. If the organization contains only private repositories, provide a GitHub Personal Access Token with 'repo' scope."
     )
 
 
@@ -270,19 +270,19 @@ def fetch_single_github_repo(url_or_slug: str, token: str = "") -> dict[str, Any
         if exc.code == 404:
             raise RuntimeError(
                 f"Repository '{slug}' not found on GitHub (HTTP 404).\n\n"
-                "👉 Resolution:\n"
+                "Resolution:\n"
                 "If this is a PRIVATE repository, GitHub hides it until you supply a Personal Access Token.\n"
                 "Provide a GitHub PAT with 'repo' scope at github.com/settings/tokens."
             )
         if exc.code == 401:
             raise RuntimeError(
                 "GitHub API 401 Unauthorized: The provided Personal Access Token (PAT) is invalid or expired.\n\n"
-                "👉 Resolution: Generate a new token with 'repo' scope at github.com/settings/tokens."
+                "Resolution: Generate a new token with 'repo' scope at github.com/settings/tokens."
             )
         if exc.code == 403:
             raise RuntimeError(
                 f"GitHub API 403 Forbidden: {exc.reason}.\n\n"
-                "👉 Resolution: Ensure your PAT has SSO authorization or required permissions."
+                "Resolution: Ensure your PAT has SSO authorization or required permissions."
             )
         raise RuntimeError(f"GitHub API error ({exc.code}): {exc.reason}")
     except Exception as exc:
@@ -328,7 +328,7 @@ def clone_or_sync_repo(
                 if "Authentication failed" in raw_err or "Repository not found" in raw_err or "could not read Username" in raw_err:
                     raise RuntimeError(
                         f"Authentication failed for repository '{target_name}'.\n\n"
-                        "👉 If this is a private repository, please provide a valid GitHub Personal Access Token (PAT) with 'repo' scope."
+                        "If this is a private repository, please provide a valid GitHub Personal Access Token (PAT) with 'repo' scope."
                     )
                 raise RuntimeError(f"Failed to clone repository '{target_name}': {raw_err}")
 

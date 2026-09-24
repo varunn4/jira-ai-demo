@@ -1,0 +1,352 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: #ffffff;
+    --foreground: #0f172a;
+
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+
+    --primary: #4f46e5;
+    --primary-foreground: #ffffff;
+
+    --secondary: #f1f5f9;
+    --secondary-foreground: #0f172a;
+
+    --muted: #64748b;
+    --muted-foreground: #64748b;
+    --muted-background: #f8fafc;
+
+    --accent: #eef2ff;
+    --accent-foreground: #4338ca;
+
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+
+    --border: #e2e8f0;
+    --input: #cbd5e1;
+    --ring: #4f46e5;
+
+    --radius: 0.5rem;
+
+    /* Semantic tokens */
+    --ink: var(--foreground);
+    --ink-soft: #334155;
+    --line: var(--border);
+    --line-strong: var(--input);
+    --surface: #f8fafc;
+    --surface-2: var(--secondary);
+    --surface-hover: var(--border);
+    --bg: #f8fafc;
+    --accent-strong: var(--accent-foreground);
+    --accent-soft: var(--accent);
+    --danger: var(--destructive);
+    --danger-soft: #fef2f2;
+    --ok: #10b981;
+    --ok-soft: #ecfdf5;
+    --warn: #f59e0b;
+    --warn-soft: #fffbeb;
+    --r-sm: 6px;
+    --r: 10px;
+    --r-lg: 14px;
+    --r-pill: 9999px;
+  }
+
+  .dark {
+    --background: #090d16;
+    --foreground: #f8fafc;
+
+    --card: #0f172a;
+    --card-foreground: #f8fafc;
+
+    --popover: #0f172a;
+    --popover-foreground: #f8fafc;
+
+    --primary: #6366f1;
+    --primary-foreground: #ffffff;
+
+    --secondary: #1e293b;
+    --secondary-foreground: #f8fafc;
+
+    --muted: #94a3b8;
+    --muted-foreground: #94a3b8;
+    --muted-background: #0f172a;
+
+    --accent: #1e1b4b;
+    --accent-foreground: #c7d2fe;
+
+    --destructive: #7f1d1d;
+    --destructive-foreground: #fef2f2;
+
+    --border: #1e293b;
+    --input: #334155;
+    --ring: #6366f1;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-geist);
+  --font-mono: var(--font-geist-mono);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-background);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+.step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--primary, #4f46e5);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+}
+
+/* AI Model Drawing Component Layout */
+.ai-model-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.ai-model-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-model-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.ai-model-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-model-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--r-pill, 9999px);
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--primary);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+}
+
+.ai-model-desc {
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  line-height: 1.45;
+}
+
+.ai-model-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--secondary);
+  padding: 3.5px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  gap: 4px;
+}
+
+.ai-model-tabs button {
+  font-size: 12px;
+  padding: 6px 8px;
+  height: 32px;
+  gap: 5px;
+}
+
+.ai-model-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-key-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-key-input-field {
+  flex: 1;
+}
+
+button.ai-advanced-toggle,
+.ai-advanced-toggle {
+  width: auto !important;
+  min-height: unset !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+  border: none !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  color: var(--muted-foreground) !important;
+  cursor: pointer;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px !important;
+  border-radius: var(--radius-sm, 4px) !important;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+button.ai-advanced-toggle:hover,
+.ai-advanced-toggle:hover {
+  background: var(--secondary) !important;
+  color: var(--foreground) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* ── Admin Dashboard Sidebar Navigation ─────────────────────────────────── */
+.dash-sidebar-layout {
+  display: flex;
+  min-height: calc(100vh - 61px);
+  background: var(--background);
+}
+
+.dash-sidebar {
+  width: 250px;
+  min-width: 250px;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px 10px;
+  position: sticky;
+  top: 61px;
+  height: calc(100vh - 61px);
+  overflow-y: auto;
+}
+
+.dash-sidebar-header {
+  padding: 4px 10px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.dash-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.dash-sidebar-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100% !important;
+  padding: 8px 12px !important;
+  border-radius: var(--radius) !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--muted-foreground) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+  min-height: unset !important;
+  user-select: none;
+}
+
+.dash-sidebar-btn:hover:not(.active) {
+  background: var(--secondary) !important;
+  color: var(--foreground) !important;
+}
+
+.dash-sidebar-btn.active {
+  background: var(--primary) !important;
+  color: var(--primary-foreground, #ffffff) !important;
+  border-color: transparent !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.25) !important;
+}
+
+.dash-sidebar-btn.active .sidebar-icon,
+.dash-sidebar-btn.active span {
+  color: var(--primary-foreground, #ffffff) !important;
+}
+
+.dash-sidebar-btn.active:hover {
+  background: var(--primary) !important;
+  color: var(--primary-foreground, #ffffff) !important;
+  opacity: 0.96;
+}
+
+.dash-sidebar-btn .sidebar-icon {
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.dash-sidebar-footer {
+  padding: 12px 6px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+}
+
+.dash-content-area {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 28px 48px;
+  overflow-y: auto;
+}
