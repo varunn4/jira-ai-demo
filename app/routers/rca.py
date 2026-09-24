@@ -41,14 +41,19 @@ def rca_start(
     key = jira_key.strip().upper()
     if not re.match(r"^[A-Z][A-Z0-9]+-\d+$", key):
         raise HTTPException(status_code=400, detail=f"Invalid Jira key: {jira_key!r}")
-    run = rca_run_store.create(
-        key,
-        user_id=getattr(_user, "id", None),
-        user_email=getattr(_user, "email", None),
-    )
-    background_tasks.add_task(_run_rca_pipeline, run.run_id)
-    log.info("Enqueued RCA run %s for %s by %s", run.run_id, key, getattr(_user, "email", "unknown"))
-    return {"run_id": run.run_id, "jira_key": key, "status": run.status}
+    try:
+        rca_run_store.init_schema()
+        run = rca_run_store.create(
+            key,
+            user_id=getattr(_user, "id", None),
+            user_email=getattr(_user, "email", None),
+        )
+        background_tasks.add_task(_run_rca_pipeline, run.run_id)
+        log.info("Enqueued RCA run %s for %s by %s", run.run_id, key, getattr(_user, "email", "unknown"))
+        return {"run_id": run.run_id, "jira_key": key, "status": run.status}
+    except Exception as exc:
+        log.exception("Failed to start RCA for %s: %s", key, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to start RCA: {str(exc)}")
 
 
 @router.get("/rca/runs")

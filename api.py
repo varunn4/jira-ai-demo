@@ -69,6 +69,14 @@ async def lifespan(_app: FastAPI):
     except Exception:
         log.exception("Document usage schema initialization failed")
 
+    # RCA run store schema
+    try:
+        from app.routers.rca import rca_run_store
+
+        rca_run_store.init_schema()
+    except Exception:
+        log.exception("RCA run store schema initialization failed")
+
     try:
         yield
     finally:
