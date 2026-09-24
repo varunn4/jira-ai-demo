@@ -414,15 +414,20 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
                 llm = build_llm_client(settings)
                 prompt = (
                     f"User message: {text}\n\n"
-                    f"Jira Ticket Key: {issue_key}\n"
+                    f"Jira Ticket: {issue_key}\n"
                     f"Summary: {summary}\n"
-                    f"Status: {status_name}\n\n"
-                    f"As an AI Scrum Master & Delivery Governor, provide a helpful, concise response."
+                    f"Status: {status_name}\n"
                 )
                 bot_reply = llm.complete(
-                    system_prompt="You are AI Governor, an autonomous Scrum Master and delivery governance agent.",
+                    system_prompt=(
+                        "You are AI Governor, an autonomous Scrum Master and delivery governance agent on Slack.\n"
+                        "FORMATTING RULES:\n"
+                        "- Keep responses short, crisp, and direct.\n"
+                        "- DO NOT use markdown tables (| col |). Use clean bullet points (•) and bold headers (*text*).\n"
+                        "- Highlight key ticket facts (status, summary, next steps) cleanly."
+                    ),
                     user_message=prompt,
-                    max_tokens=800,
+                    max_tokens=500,
                 ).strip()
                 slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
                 return
@@ -447,8 +452,8 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
                             "SELECT ticket_key, summary, status, priority, assignee_name FROM jira_ticket_cache ORDER BY updated_at DESC NULLS LAST LIMIT 15"
                         ).fetchall()
                     if rows:
-                        lines = [f"- **{r['ticket_key']}**: \"{r['summary']}\" (Status: {r['status'] or 'Open'}, Assignee: {r['assignee_name'] or 'Unassigned'}, Priority: {r['priority'] or 'Medium'})" for r in rows]
-                        jira_context = "\n\nAvailable Jira tickets in workspace:\n" + "\n".join(lines)
+                        lines = [f"• *{r['ticket_key']}*: {r['summary']} — *{r['status'] or 'Open'}* (Assignee: {r['assignee_name'] or 'Unassigned'})" for r in rows]
+                        jira_context = "\n\nLive Jira Tickets in Workspace:\n" + "\n".join(lines)
             except Exception as j_exc:
                 log.warning("Could not fetch jira cache context for slack event: %s", j_exc)
 
@@ -456,12 +461,16 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
         prompt = f"User message: {text}{jira_context}"
         bot_reply = llm.complete(
             system_prompt=(
-                "You are AI Governor, an autonomous Scrum Master and delivery governor assisting the team on Slack. "
-                "Provide clear, complete, helpful, professional, and actionable responses. "
-                "When referencing tickets, ALWAYS use the real Jira ticket keys and details provided in the context."
+                "You are AI Governor, an autonomous Scrum Master and delivery governor assisting the team on Slack.\n\n"
+                "CRITICAL FORMATTING & TONE RULES FOR SLACK:\n"
+                "1. Keep responses SHORT, CRISP, and cleanly structured.\n"
+                "2. NEVER output markdown tables (| col | col |). Slack does not render tables; use bullet points (•) and bold (*text*).\n"
+                "3. If greeted (e.g. 'Hello', 'Hi'), introduce yourself in 2-3 brief bullet points explaining how you help with sprint tracking and blockers.\n"
+                "4. When asked about tickets, list ONLY the real Jira tickets provided in the workspace context above with their key, summary, and status.\n"
+                "5. No filler text or verbose explanations. Get straight to actionable answers."
             ),
             user_message=prompt,
-            max_tokens=800,
+            max_tokens=500,
         ).strip()
         slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
     except Exception as exc:

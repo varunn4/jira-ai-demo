@@ -38,10 +38,14 @@ class ProjectGoneError(Exception):
 # ─── Jira REST helpers ───────────────────────────────────────────────────────
 
 def _auth() -> HTTPBasicAuth:
+    from app.config import reload_settings
+    reload_settings()
     return HTTPBasicAuth(settings.jira_email, settings.jira_api_token)
 
 
 def _jira_get(path: str, params: Optional[dict] = None) -> dict[str, Any]:
+    from app.config import reload_settings
+    reload_settings()
     base = (settings.jira_base_url or "").rstrip("/")
     clean_path = ("/" + path.lstrip("/")) if path else ""
     url = f"{base}{clean_path}"
@@ -139,47 +143,51 @@ def _jira_credentials_are_valid() -> bool:
 def _fetch_all_projects() -> list[dict[str, Any]]:
     """Return all Jira projects, skipping archived ones."""
     projects: list[dict[str, Any]] = []
-
     start = 0
 
-    while True:
-        data = _jira_get(
-            "/rest/api/3/project/search",
-            {
-                "startAt": start,
-                "maxResults": 50,
-            },
-        )
+    try:
+        while True:
+            data = _jira_get(
+                "/rest/api/3/project/search",
+                {
+                    "startAt": start,
+                    "maxResults": 50,
+                },
+            )
 
-        batch = data.get("values", [])
+            batch = data.get("values", [])
+            if not batch:
+                break
 
-        # Skip archived projects safely
-        excluded = _excluded_project_keys()
-        active_projects = [
-            p for p in batch
-            if not p.get("archived", False)
-            and str(p.get("key", "")).upper() not in excluded
-        ]
+            excluded = _excluded_project_keys()
+            active_projects = [
+                p for p in batch
+                if not p.get("archived", False)
+                and str(p.get("key", "")).upper() not in excluded
+            ]
 
-        projects.extend(active_projects)
-
-        total = data.get("total", 0)
-
-        start += len(batch)
-
-        if start >= total or not batch:
-            break
+            projects.extend(active_projects)
+            total = data.get("total", 0)
+            start += len(batch)
+            if start >= total:
+                break
+    except Exception as exc:
+        log.warning("Project search failed via /rest/api/3/project/search: %s, trying /rest/api/3/project", exc)
+        try:
+            raw_list = _jira_get("/rest/api/3/project")
+            if isinstance(raw_list, list):
+                excluded = _excluded_project_keys()
+                projects = [p for p in raw_list if not p.get("archived", False) and str(p.get("key", "")).upper() not in excluded]
+        except Exception as e2:
+            log.warning("Fallback project fetch failed: %s", e2)
 
     return projects
 
 
 def _fetch_tickets_for_project(project_key: str) -> list[dict[str, Any]]:
-    """Paginate through all issues in a Jira project."""
-
+    """Paginate through all issues in a Jira project using standard /rest/api/3/search or /rest/api/2/search."""
     tickets: list[dict[str, Any]] = []
-
     start = 0
-    next_page_token: Optional[str] = None
 
     fields = (
         "summary,description,status,issuetype,priority,"
@@ -191,36 +199,33 @@ def _fetch_tickets_for_project(project_key: str) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "jql": f'project="{project_key}" ORDER BY created DESC',
             "maxResults": 100,
+            "startAt": start,
             "fields": fields,
         }
-        if next_page_token:
-            params["nextPageToken"] = next_page_token
-        else:
-            params["startAt"] = start
 
-        data = _jira_get(
-            "/rest/api/3/search/jql",
-            params,
-        )
+        # Try standard search endpoints in order: /rest/api/3/search -> /rest/api/2/search -> /rest/api/3/search/jql
+        data = None
+        for search_path in ("/rest/api/3/search", "/rest/api/2/search", "/rest/api/3/search/jql"):
+            try:
+                data = _jira_get(search_path, params)
+                break
+            except Exception as e:
+                log.debug("Jira search via %s failed: %s", search_path, e)
+                continue
 
-        batch = data.get("issues", [])
-
-        tickets.extend(batch)
-
-        start += len(batch)
-        next_page_token = data.get("nextPageToken")
-
-        if data.get("isLast") is True:
+        if not data or not isinstance(data, dict):
             break
 
-        if next_page_token:
-            continue
+        batch = data.get("issues", [])
+        if not batch:
+            break
 
+        tickets.extend(batch)
+        start += len(batch)
         total = data.get("total")
         if total is not None and start >= total:
             break
-
-        if not batch:
+        if len(batch) < 100:
             break
 
     return tickets
