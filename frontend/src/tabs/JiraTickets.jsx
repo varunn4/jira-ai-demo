@@ -49,7 +49,7 @@ export default function JiraTickets() {
 
   async function loadData(forceRefresh = false) {
     setLoading(true);
-    setInfo({ msg: forceRefresh ? "🔄 Fetching latest tickets from Jira Cloud..." : "", error: false });
+    setInfo({ msg: forceRefresh ? "Fetching latest tickets from Jira Cloud..." : "", error: false });
     const params = new URLSearchParams({ limit: "500", match_type: "all" });
     if (forceRefresh) params.set("force_refresh", "true");
     const proj = projectKey.trim().toUpperCase();
@@ -69,7 +69,7 @@ export default function JiraTickets() {
       setCounts(data.counts || {});
       setTickets(data.tickets || []);
       if (forceRefresh) {
-        setInfo({ msg: `✓ Synchronized ${data.total_tickets || 0} tickets from Jira Cloud!`, error: false });
+        setInfo({ msg: `Synchronized ${data.total_tickets || 0} tickets from Jira Cloud!`, error: false });
       }
     } catch (err) {
       setInfo({ msg: err.message, error: true });
