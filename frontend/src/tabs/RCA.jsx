@@ -4,6 +4,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiDownload } from "../api.js";
 import { fmtDuration } from "../lib/format";
+import {
+  MagnifyingGlass,
+  FileText,
+  Play,
+  SpinnerGap,
+  CheckCircle,
+  WarningCircle,
+  Database,
+  ArrowSquareOut,
+  CaretDown,
+  CaretUp,
+  GitBranch,
+} from "@phosphor-icons/react";
 
 const TERMINAL = new Set(["delivered", "low_confidence", "failed"]);
 
@@ -11,9 +24,9 @@ const STATUS_LABEL = {
   queued: "Queued",
   investigating: "Investigating codebase…",
   synthesizing: "Synthesizing diagnosis…",
-  delivered: "Diagnosis ready",
-  low_confidence: "Low confidence — review",
-  failed: "Failed",
+  delivered: "Diagnosis Ready",
+  low_confidence: "Low Confidence (Human Review Recommended)",
+  failed: "Investigation Failed",
 };
 
 export default function RCA() {
@@ -60,7 +73,7 @@ export default function RCA() {
   const start = async () => {
     const key = ticketId.trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) {
-      setError("Enter a valid Jira key, e.g. OPS-428");
+      setError("Please enter a valid Jira defect key, e.g. SCRUM-9 or OPS-428");
       return;
     }
     setError("");
@@ -94,105 +107,306 @@ export default function RCA() {
   const classification = diagnosis?.issue_classification;
 
   return (
-    <div className="rca-tab">
-      <h2>Root Cause Analysis</h2>
-      <p className="muted">
-        Enter a Jira defect ID. The system investigates the codebase read-only and
-        produces a diagnosis pinpointing the most likely root cause with evidence.
-        It does not generate or apply fixes.
-      </p>
+    <div className="rca-tab" style={{ maxWidth: "1200px", margin: "0 auto" }}>
+      {/* ── Header ── */}
+      <div style={{ marginBottom: "18px" }}>
+        <h2 style={{ fontSize: "20px", fontWeight: "750", margin: "0 0 6px", color: "var(--ink, #0f172a)" }}>
+          Root Cause Analysis (RCA)
+        </h2>
+        <p style={{ margin: 0, color: "var(--muted, #64748b)", fontSize: "13.5px", lineHeight: 1.5 }}>
+          Investigate Jira defects autonomously across your indexed repositories. The AI agent inspects code read-only
+          and produces evidence-first diagnoses pinpointing the exact failure mechanism.
+        </p>
+      </div>
 
-      {/* ── Step-by-Step RCA Workflow Guide ── */}
+      {/* ── Workflow Guide ── */}
       <div
         style={{
           background: "var(--card, #ffffff)",
           border: "1px solid var(--line, #e2e8f0)",
-          borderRadius: "8px",
-          padding: "14px 16px",
-          margin: "12px 0 16px",
-          fontSize: "13px",
+          borderRadius: "10px",
+          padding: "16px 20px",
+          marginBottom: "18px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
         }}
       >
-        <div style={{ fontWeight: 600, color: "var(--text, #1e293b)", marginBottom: "8px" }}>
-          How to run an RCA Investigation:
+        <div style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted, #64748b)", marginBottom: "12px" }}>
+          RCA Investigation Workflow
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
-          <div style={{ padding: "10px", background: "rgba(37,99,235,0.04)", borderRadius: "6px", border: "1px solid rgba(37,99,235,0.1)" }}>
-            <strong style={{ color: "var(--primary, #2563eb)" }}>Step 1: Build Code Index</strong>
-            <p style={{ margin: "4px 0 0", color: "var(--text-muted, #64748b)", fontSize: "12px", lineHeight: 1.4 }}>
-              Click <strong>Build now</strong> below to index repository functions into vector chunks so the AI agent can discover relevant code.
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
+          <div style={{ padding: "12px 14px", background: "rgba(37,99,235,0.03)", borderRadius: "8px", border: "1px solid rgba(37,99,235,0.1)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", fontSize: "13px", color: "var(--accent-strong, #2563eb)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "20px", height: "20px", borderRadius: "50%", background: "#2563eb", color: "#fff", fontSize: "11px" }}>1</span>
+              Build Code Index
+            </div>
+            <p style={{ margin: "6px 0 0", color: "var(--muted, #64748b)", fontSize: "12px", lineHeight: 1.45 }}>
+              Click <strong>Build now</strong> below to index AST code chunks into vector embeddings for semantic discovery.
             </p>
           </div>
-          <div style={{ padding: "10px", background: "rgba(37,99,235,0.04)", borderRadius: "6px", border: "1px solid rgba(37,99,235,0.1)" }}>
-            <strong style={{ color: "var(--primary, #2563eb)" }}>Step 2: Select Defect &amp; Target Repo</strong>
-            <p style={{ margin: "4px 0 0", color: "var(--text-muted, #64748b)", fontSize: "12px", lineHeight: 1.4 }}>
-              Enter the Jira Ticket ID (e.g. <code>SCRUM-9</code>) and select a repository (or keep auto-detect).
+          <div style={{ padding: "12px 14px", background: "rgba(37,99,235,0.03)", borderRadius: "8px", border: "1px solid rgba(37,99,235,0.1)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", fontSize: "13px", color: "var(--accent-strong, #2563eb)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "20px", height: "20px", borderRadius: "50%", background: "#2563eb", color: "#fff", fontSize: "11px" }}>2</span>
+              Select Defect &amp; Target Repo
+            </div>
+            <p style={{ margin: "6px 0 0", color: "var(--muted, #64748b)", fontSize: "12px", lineHeight: 1.45 }}>
+              Enter the Jira Ticket Key (e.g. <code>SCRUM-9</code>) and select the target repository (or leave as auto-detect).
             </p>
           </div>
-          <div style={{ padding: "10px", background: "rgba(37,99,235,0.04)", borderRadius: "6px", border: "1px solid rgba(37,99,235,0.1)" }}>
-            <strong style={{ color: "var(--primary, #2563eb)" }}>Step 3: Run RCA &amp; Export</strong>
-            <p style={{ margin: "4px 0 0", color: "var(--text-muted, #64748b)", fontSize: "12px", lineHeight: 1.4 }}>
-              Click <strong>Run RCA</strong> to generate the root-cause diagnosis, inspect the agent trace, and download the official <strong>.docx</strong> report.
+          <div style={{ padding: "12px 14px", background: "rgba(37,99,235,0.03)", borderRadius: "8px", border: "1px solid rgba(37,99,235,0.1)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", fontSize: "13px", color: "var(--accent-strong, #2563eb)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "20px", height: "20px", borderRadius: "50%", background: "#2563eb", color: "#fff", fontSize: "11px" }}>3</span>
+              Run RCA &amp; Export
+            </div>
+            <p style={{ margin: "6px 0 0", color: "var(--muted, #64748b)", fontSize: "12px", lineHeight: 1.45 }}>
+              Click <strong>Run RCA</strong> to inspect agent reasoning steps in real time and download the formal <strong>.docx</strong> diagnosis.
             </p>
           </div>
         </div>
       </div>
 
+      {/* ── Semantic Code Index Panel (Single Instance) ── */}
       <CodeIndexPanel />
 
-      <div className="rca-controls" style={{ display: "flex", gap: 10, margin: "14px 0", flexWrap: "wrap", alignItems: "center" }}>
-        <input
-          value={ticketId}
-          onChange={(e) => setTicketId(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !busy && start()}
-          placeholder="Ticket ID (e.g. SCRUM-9)"
-          disabled={busy}
-          style={{ flex: "0 0 220px" }}
-        />
-        <select
-          value={selectedRepo}
-          onChange={(e) => setSelectedRepo(e.target.value)}
-          disabled={busy}
-          style={{ flex: "0 0 240px", padding: "8px 12px", fontSize: "13px" }}
+      {/* ── RCA Investigation Controls Card ── */}
+      <div
+        style={{
+          background: "var(--card, #ffffff)",
+          border: "1px solid var(--line, #e2e8f0)",
+          borderRadius: "10px",
+          padding: "18px 20px",
+          marginBottom: "20px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+        }}
+      >
+        <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--ink, #0f172a)", marginBottom: "12px" }}>
+          Launch RCA Investigation
+        </div>
+
+        <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: "1 1 240px", minWidth: "200px" }}>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "var(--ink-soft, #334155)", marginBottom: "6px" }}>
+              Jira Defect Key
+            </label>
+            <div style={{ position: "relative" }}>
+              <input
+                value={ticketId}
+                onChange={(e) => setTicketId(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !busy && start()}
+                placeholder="e.g. SCRUM-9 or OPS-428"
+                disabled={busy}
+                style={{
+                  width: "100%",
+                  height: "40px",
+                  padding: "0 12px 0 36px",
+                  fontSize: "13.5px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line-strong, #cbd5e1)",
+                  background: "var(--surface, #ffffff)",
+                  boxSizing: "border-box",
+                }}
+              />
+              <MagnifyingGlass
+                size={16}
+                style={{ position: "absolute", left: "12px", top: "12px", color: "var(--muted, #94a3b8)", pointerEvents: "none" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ flex: "1 1 280px", minWidth: "220px" }}>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "var(--ink-soft, #334155)", marginBottom: "6px" }}>
+              Target Repository
+            </label>
+            <div style={{ position: "relative" }}>
+              <select
+                value={selectedRepo}
+                onChange={(e) => setSelectedRepo(e.target.value)}
+                disabled={busy}
+                style={{
+                  width: "100%",
+                  height: "40px",
+                  padding: "0 12px 0 34px",
+                  fontSize: "13.5px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line-strong, #cbd5e1)",
+                  background: "var(--surface, #ffffff)",
+                  boxSizing: "border-box",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">All active repositories (auto-detect)</option>
+                {repoList.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <GitBranch
+                size={16}
+                style={{ position: "absolute", left: "12px", top: "12px", color: "var(--muted, #94a3b8)", pointerEvents: "none" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flex: "0 0 auto" }}>
+            <button
+              onClick={start}
+              disabled={busy}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                height: "40px",
+                padding: "0 22px",
+                fontSize: "13.5px",
+                fontWeight: "600",
+                borderRadius: "6px",
+                background: "var(--accent-grad-strong, #2563eb)",
+                color: "#ffffff",
+                border: "none",
+                cursor: busy ? "not-allowed" : "pointer",
+                boxShadow: "0 1px 3px rgba(37,99,235,0.25)",
+                width: "auto",
+                minWidth: "140px",
+              }}
+            >
+              {busy ? (
+                <>
+                  <SpinnerGap size={17} className="animate-spin" />
+                  <span>Investigating…</span>
+                </>
+              ) : (
+                <>
+                  <Play size={15} weight="fill" />
+                  <span>Run RCA</span>
+                </>
+              )}
+            </button>
+
+            {(status === "delivered" || status === "low_confidence") && (
+              <button
+                onClick={downloadDocx}
+                className="secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  height: "40px",
+                  padding: "0 18px",
+                  fontSize: "13.5px",
+                  fontWeight: "600",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line-strong, #cbd5e1)",
+                  background: "#ffffff",
+                  color: "var(--ink, #0f172a)",
+                  cursor: "pointer",
+                  width: "auto",
+                }}
+              >
+                <FileText size={16} style={{ color: "#2563eb" }} />
+                <span>Download .docx</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Error Banner ── */}
+      {error && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            padding: "12px 16px",
+            borderRadius: "8px",
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.25)",
+            color: "#b91c1c",
+            fontSize: "13.5px",
+            marginBottom: "18px",
+          }}
         >
-          <option value="">All active repositories (auto-detect)</option>
-          {repoList.map((r) => (
-            <option key={r.name} value={r.name}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-        <button onClick={start} disabled={busy}>
-          {busy ? "Running…" : "Run RCA"}
-        </button>
-        {status === "delivered" || status === "low_confidence" ? (
-          <button onClick={downloadDocx} className="secondary">
-            Download .docx
-          </button>
-        ) : null}
-      </div>
-
-      <CodeIndexPanel />
-
-      {error ? <div className="error-banner">{error}</div> : null}
-
-      {run ? (
-        <div className="rca-status" style={{ margin: "8px 0" }}>
-          <strong>{STATUS_LABEL[status] || status}</strong>
-          {classification ? <span> · {classification}</span> : null}
-          {confidenceLabel ? <span> · confidence {confidenceLabel}</span> : null}
-          {status === "low_confidence" ? (
-            <span className="muted"> · routed to human review (low confidence)</span>
-          ) : null}
-          {run.error ? <div className="error-banner">{run.error}</div> : null}
+          <WarningCircle size={18} weight="fill" style={{ flexShrink: 0 }} />
+          <span>{error}</span>
         </div>
-      ) : null}
+      )}
 
-      {!TERMINAL.has(status) && run ? (
-        <LiveTrace trace={run.agent_trace} />
-      ) : null}
+      {/* ── Investigation Status Header ── */}
+      {run && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px",
+            padding: "12px 18px",
+            background: "var(--card, #ffffff)",
+            border: "1px solid var(--line, #e2e8f0)",
+            borderRadius: "8px",
+            marginBottom: "16px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <span
+              className={`badge ${
+                status === "delivered"
+                  ? "ok"
+                  : status === "low_confidence"
+                  ? "warn"
+                  : status === "failed"
+                  ? "err"
+                  : "run"
+              }`}
+              style={{ fontSize: "12px", padding: "4px 10px" }}
+            >
+              {STATUS_LABEL[status] || status}
+            </span>
+            <span style={{ fontSize: "13.5px", fontWeight: "600", color: "var(--ink, #0f172a)" }}>
+              Ticket: {run.jira_key}
+            </span>
+            {classification && (
+              <span style={{ fontSize: "13px", color: "var(--muted, #64748b)" }}>
+                · Classification: <strong>{classification}</strong>
+              </span>
+            )}
+            {confidenceLabel && (
+              <span style={{ fontSize: "13px", color: "var(--muted, #64748b)" }}>
+                · Confidence: <strong>{confidenceLabel}</strong>
+              </span>
+            )}
+          </div>
+          {status === "delivered" && (
+            <button
+              onClick={downloadDocx}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "12.5px",
+                fontWeight: "600",
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "1px solid var(--accent-strong, #2563eb)",
+                background: "rgba(37,99,235,0.05)",
+                color: "var(--accent-strong, #2563eb)",
+                cursor: "pointer",
+                width: "auto",
+              }}
+            >
+              <FileText size={14} />
+              Export .docx
+            </button>
+          )}
+        </div>
+      )}
 
-      {diagnosis ? <Diagnosis markdown={run.markdown} run={run} /> : null}
+      {/* ── Live Investigation Trace ── */}
+      {!TERMINAL.has(status) && run && <LiveTrace trace={run.agent_trace} />}
+
+      {/* ── Diagnosis Markdown & Output ── */}
+      {diagnosis && <Diagnosis markdown={run.markdown} run={run} />}
     </div>
   );
 }
@@ -287,10 +501,11 @@ function CodeIndexPanel() {
     <div className="ci-card">
       <div className="ci-head">
         <div className="ci-title-wrap">
-          <span className="ci-title">Semantic code index</span>
+          <Database size={17} style={{ color: "#2563eb" }} />
+          <span className="ci-title">Semantic Code Index</span>
           <span className={`badge ${badge.cls}`}>{badge.text}</span>
           {!updating && points != null ? (
-            <span className="ci-sub">{Number(points).toLocaleString()} chunks</span>
+            <span className="ci-sub">{Number(points).toLocaleString()} indexed chunks</span>
           ) : null}
         </div>
         <div className="ci-controls">
@@ -315,7 +530,7 @@ function CodeIndexPanel() {
             title="Comma-separated repo names to skip (large repos like AWS)"
           />
           <button className="ci-btn" onClick={build} disabled={building || updating}>
-            {building ? "Starting…" : updating ? "Building…" : ready ? "Rebuild" : "Build now"}
+            {building ? "Starting…" : updating ? "Building…" : ready ? "Rebuild Index" : "Build Index"}
           </button>
         </div>
       </div>
@@ -340,7 +555,7 @@ function CodeIndexPanel() {
       ) : null}
 
       {!updating && !ready ? (
-        <div className="ci-note">Semantic retriever disabled until the index is built.</div>
+        <div className="ci-note">Semantic retriever will be activated once the code index is built.</div>
       ) : null}
       {msg ? <div className="ci-note">{msg}</div> : null}
     </div>
@@ -349,16 +564,31 @@ function CodeIndexPanel() {
 
 function LiveTrace({ trace }) {
   if (!trace || trace.length === 0) {
-    return <p className="muted">Gathering evidence…</p>;
+    return (
+      <div style={{ padding: "16px", background: "var(--card, #fff)", border: "1px solid var(--line, #e2e8f0)", borderRadius: "8px", marginBottom: "16px" }}>
+        <p style={{ margin: 0, color: "var(--muted, #64748b)", fontSize: "13px" }}>Gathering codebase evidence and constructing AST graph…</p>
+      </div>
+    );
   }
   return (
-    <div className="rca-trace">
-      <h4>Investigation ({trace.length} steps)</h4>
-      <ul>
+    <div
+      style={{
+        background: "var(--card, #ffffff)",
+        border: "1px solid var(--line, #e2e8f0)",
+        borderRadius: "8px",
+        padding: "16px 20px",
+        marginBottom: "18px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: "700", color: "var(--ink, #0f172a)", marginBottom: "12px" }}>
+        <SpinnerGap size={16} className="animate-spin" style={{ color: "#2563eb" }} />
+        <span>Live Investigation Trace ({trace.length} steps executed)</span>
+      </div>
+      <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "13px", lineHeight: "1.6" }}>
         {trace.slice(-8).map((t, i) => (
-          <li key={i}>
-            <code>{t.tool}</code>{" "}
-            <span className="muted">{summarizeInput(t.input)}</span>
+          <li key={i} style={{ marginBottom: "4px" }}>
+            <code style={{ background: "rgba(37,99,235,0.08)", color: "#2563eb", padding: "2px 6px", borderRadius: "4px", fontWeight: "600" }}>{t.tool}</code>{" "}
+            <span style={{ color: "var(--muted, #64748b)", fontSize: "12px" }}>{summarizeInput(t.input)}</span>
           </li>
         ))}
       </ul>
@@ -369,25 +599,81 @@ function LiveTrace({ trace }) {
 function summarizeInput(input) {
   if (!input) return "";
   return Object.entries(input)
-    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+    .map(([k, v]) => `${k}=${String(v).slice(0, 50)}`)
     .join(", ");
 }
 
 function Diagnosis({ markdown, run }) {
   const [showTrace, setShowTrace] = useState(false);
   return (
-    <div className="rca-result">
-      <pre className="rca-markdown" style={{ whiteSpace: "pre-wrap" }}>
-        {markdown || "Diagnosis produced; open the .docx for the full report."}
-      </pre>
-      <button className="link" onClick={() => setShowTrace((s) => !s)}>
-        {showTrace ? "Hide" : "Show"} agent trace ({run.agent_trace?.length || 0} steps)
-      </button>
-      {showTrace ? (
-        <pre className="rca-trace-json" style={{ maxHeight: 300, overflow: "auto" }}>
-          {JSON.stringify(run.agent_trace, null, 2)}
+    <div
+      style={{
+        background: "var(--card, #ffffff)",
+        border: "1px solid var(--line, #e2e8f0)",
+        borderRadius: "10px",
+        padding: "20px 24px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+        <div style={{ fontSize: "15px", fontWeight: "750", color: "var(--ink, #0f172a)" }}>
+          Investigation Diagnosis
+        </div>
+      </div>
+      <div
+        style={{
+          background: "var(--surface-2, #f8fafc)",
+          border: "1px solid var(--line, #e2e8f0)",
+          borderRadius: "8px",
+          padding: "16px 20px",
+          fontSize: "13.5px",
+          lineHeight: "1.6",
+          color: "var(--ink, #0f172a)",
+          overflowX: "auto",
+        }}
+      >
+        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}>
+          {markdown || "Diagnosis produced; download the .docx report for full structured findings."}
         </pre>
-      ) : null}
+      </div>
+
+      <div style={{ marginTop: "16px" }}>
+        <button
+          onClick={() => setShowTrace((s) => !s)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            background: "none",
+            border: "none",
+            color: "var(--accent-strong, #2563eb)",
+            fontWeight: "600",
+            fontSize: "13px",
+            cursor: "pointer",
+            padding: 0,
+            width: "auto",
+          }}
+        >
+          {showTrace ? <CaretUp size={14} /> : <CaretDown size={14} />}
+          <span>{showTrace ? "Hide" : "View"} Complete Agent Trace ({run.agent_trace?.length || 0} steps)</span>
+        </button>
+        {showTrace && (
+          <pre
+            style={{
+              marginTop: "10px",
+              padding: "14px",
+              background: "#0f172a",
+              color: "#f8fafc",
+              borderRadius: "8px",
+              fontSize: "12px",
+              maxHeight: "350px",
+              overflow: "auto",
+            }}
+          >
+            {JSON.stringify(run.agent_trace, null, 2)}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

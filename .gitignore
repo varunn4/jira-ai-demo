@@ -85,6 +85,8 @@ app/static/rings/generated/
 
 # ── Local Test & Verification Scripts ─────────────────────────────────────────
 scripts/generate_live_testcases.py
+scripts/generate_walkthrough_pdf.py
+scripts/*walkthrough*
 scripts/import_n8n_workflows.py
 scripts/process_thread_reply.py
 scripts/run_live_approval.py
