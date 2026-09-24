@@ -40,6 +40,7 @@ export default function Neo4jGraph({ setStatus }) {
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [showRawLogs, setShowRawLogs] = useState(false);
   const [phraseIdx, setPhraseIdx] = useState(0);
 
@@ -49,6 +50,7 @@ export default function Neo4jGraph({ setStatus }) {
   const loadAnalytics = useCallback(async () => {
     const data = await apiFetch("/graph-admin/neo4j/analytics");
     setAnalytics(data);
+    return data;
   }, []);
 
   const loadRepos = useCallback(async () => {
@@ -57,7 +59,20 @@ export default function Neo4jGraph({ setStatus }) {
     setRepos(list);
     // Select all available repositories by default if none selected yet
     setSelected((prev) => (prev.size === 0 ? new Set(list.map((r) => r.name)) : prev));
+    return list;
   }, []);
+
+  async function handleRefreshAnalytics() {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadAnalytics(), loadRepos()]);
+      setStatus({ msg: "Neo4j graph analytics refreshed successfully.", cls: "ok" });
+    } catch (err) {
+      setStatus({ msg: `Failed to refresh analytics: ${err.message}`, cls: "error" });
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -422,8 +437,12 @@ export default function Neo4jGraph({ setStatus }) {
       <section className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}>Graph Analytics</h3>
-          <button className="secondary" onClick={() => { loadAnalytics().catch(() => {}); loadRepos().catch(() => {}); }} disabled={busy}>
-            Refresh analytics
+          <button
+            className="secondary"
+            onClick={handleRefreshAnalytics}
+            disabled={busy || refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh analytics"}
           </button>
         </div>
 
