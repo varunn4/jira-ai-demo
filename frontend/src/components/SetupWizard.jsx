@@ -1,5 +1,33 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
+import { GithubLogo } from "@phosphor-icons/react";
+import {
+  Check,
+  Building2,
+  Link2,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Loader2,
+  Search,
+  CheckCircle2,
+  FolderGit2,
+  XCircle,
+  Ticket,
+  KeyRound,
+  Zap,
+  Brain,
+  Bot,
+  Sparkles,
+  Cpu,
+  FlaskConical,
+  Rocket,
+  Mail,
+  Settings,
+  ArrowLeft,
+  ArrowRight,
+  AlertCircle,
+} from "lucide-react";
 
 export default function SetupWizard({ onComplete }) {
   const [step, setStep] = useState(1);
@@ -256,22 +284,22 @@ export default function SetupWizard({ onComplete }) {
           {/* Stepper Indicator */}
           <div className="stepper-bar">
             <div className={`step-item ${step >= 1 ? "active" : ""} ${step > 1 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 1 ? "✓" : "1"}</div>
+              <div className="step-circle">{step > 1 ? <Check size={14} strokeWidth={2.5} /> : "1"}</div>
               <span className="step-label">GitHub Repos</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 2 ? "active" : ""} ${step > 2 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 2 ? "✓" : "2"}</div>
+              <div className="step-circle">{step > 2 ? <Check size={14} strokeWidth={2.5} /> : "2"}</div>
               <span className="step-label">Jira Cloud</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 3 ? "active" : ""} ${step > 3 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 3 ? "✓" : "3"}</div>
+              <div className="step-circle">{step > 3 ? <Check size={14} strokeWidth={2.5} /> : "3"}</div>
               <span className="step-label">AI Engine</span>
             </div>
             <div className="step-line" />
             <div className={`step-item ${step >= 4 ? "active" : ""} ${step > 4 ? "completed" : ""}`}>
-              <div className="step-circle">{step > 4 ? "✓" : "4"}</div>
+              <div className="step-circle">{step > 4 ? <Check size={14} strokeWidth={2.5} /> : "4"}</div>
               <span className="step-label">Finish</span>
             </div>
           </div>
@@ -285,7 +313,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 1 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🐙</span>
+                <span className="step-icon">
+                  <GithubLogo size={24} weight="bold" />
+                </span>
                 <div>
                   <h3 className="step-heading">GitHub Repositories Integration</h3>
                   <p className="step-desc">
@@ -300,15 +330,17 @@ export default function SetupWizard({ onComplete }) {
                   type="button"
                   className={`github-mode-btn ${formData.github_source_type === "org" ? "active" : ""}`}
                   onClick={() => handleChange("github_source_type", "org")}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
                 >
-                  🏢 GitHub Organization / User
+                  <Building2 size={15} /> GitHub Organization / User
                 </button>
                 <button
                   type="button"
                   className={`github-mode-btn ${formData.github_source_type === "urls" ? "active" : ""}`}
                   onClick={() => handleChange("github_source_type", "urls")}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
                 >
-                  🔗 Specific Repository URLs
+                  <Link2 size={15} /> Specific Repository URLs
                 </button>
               </div>
 
@@ -362,9 +394,9 @@ export default function SetupWizard({ onComplete }) {
                     href="https://github.com/settings/tokens"
                     target="_blank"
                     rel="noreferrer"
-                    style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650 }}
+                    style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, display: "inline-flex", alignItems: "center", gap: "4px" }}
                   >
-                    Generate GitHub Token ↗
+                    Generate GitHub Token <ExternalLink size={12} />
                   </a>
                 </div>
                 <div className="input-with-action" style={{ marginTop: "4px" }}>
@@ -382,9 +414,17 @@ export default function SetupWizard({ onComplete }) {
                     type="button"
                     className="action-btn"
                     onClick={() => setShowToken(!showToken)}
-                    style={{ minWidth: "70px" }}
+                    style={{ minWidth: "76px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "5px" }}
                   >
-                    {showToken ? "🙈 Hide" : "👁️ Show"}
+                    {showToken ? (
+                      <>
+                        <EyeOff size={14} /> Hide
+                      </>
+                    ) : (
+                      <>
+                        <Eye size={14} /> Show
+                      </>
+                    )}
                   </button>
                 </div>
                 <span className="field-hint">
@@ -406,7 +446,15 @@ export default function SetupWizard({ onComplete }) {
                       : !formData.github_repo_urls.trim())
                   }
                 >
-                  {validatingRepo ? "⚡ Connecting & Syncing Repositories from GitHub..." : "🔍 Authenticate & Sync Repositories"}
+                  {validatingRepo ? (
+                    <>
+                      <Loader2 size={16} className="spin" /> Connecting & Syncing Repositories from GitHub...
+                    </>
+                  ) : (
+                    <>
+                      <Search size={16} /> Authenticate & Sync Repositories
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -423,7 +471,7 @@ export default function SetupWizard({ onComplete }) {
                   {repoValidation.valid && repoValidation.repo_count > 0 ? (
                     <div>
                       <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        ✅ Successfully Connected & Synced {repoValidation.repo_count} Repository(ies)
+                        <CheckCircle2 size={16} color="var(--success, #10b981)" /> Successfully Connected & Synced {repoValidation.repo_count} Repository(ies)
                       </div>
                       <div className="box-sub" style={{ marginBottom: "8px" }}>
                         {repoValidation.message || "All repositories are ready and available in the server workspace for graph analysis."}
@@ -432,10 +480,14 @@ export default function SetupWizard({ onComplete }) {
                         {repoValidation.repos.map((name) => (
                           <div key={name} className="github-repo-card">
                             <div className="github-repo-card-head">
-                              <span className="github-repo-card-name" title={name}>📦 {name}</span>
+                              <span className="github-repo-card-name" title={name} style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                <GithubLogo size={14} weight="bold" style={{ flexShrink: 0 }} /> {name}
+                              </span>
                             </div>
                             <div className="github-repo-card-badges">
-                              <span className="github-badge-status">✓ Ready</span>
+                              <span className="github-badge-status" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                <Check size={11} strokeWidth={2.5} /> Ready
+                              </span>
                               <span className="github-badge-branch">main</span>
                             </div>
                           </div>
@@ -445,14 +497,16 @@ export default function SetupWizard({ onComplete }) {
                   ) : (
                     <div>
                       <div className="box-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span>❌ GitHub Connection / Sync Failed</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <XCircle size={16} color="var(--danger, #ef4444)" /> GitHub Connection / Sync Failed
+                        </span>
                         <a
                           href="https://github.com/settings/tokens"
                           target="_blank"
                           rel="noreferrer"
-                          style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline" }}
+                          style={{ fontSize: "11.5px", color: "var(--accent-strong)", fontWeight: 650, textDecoration: "underline", display: "inline-flex", alignItems: "center", gap: "4px" }}
                         >
-                          Open GitHub Tokens ↗
+                          Open GitHub Tokens <ExternalLink size={12} />
                         </a>
                       </div>
                       <div className="box-sub" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 6, fontSize: "12.5px" }}>
@@ -469,7 +523,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 2 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🎫</span>
+                <span className="step-icon">
+                  <Ticket size={24} />
+                </span>
                 <div>
                   <h3 className="step-heading">Jira Cloud Integration</h3>
                   <p className="step-desc">
@@ -479,14 +535,18 @@ export default function SetupWizard({ onComplete }) {
               </div>
 
               <div className="callout callout-info">
-                <strong>🔑 How to get your Jira API Token:</strong> Log in to your Atlassian account, go to{" "}
+                <strong style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <KeyRound size={15} /> How to get your Jira API Token:
+                </strong>{" "}
+                Log in to your Atlassian account, go to{" "}
                 <a
                   href="https://id.atlassian.com/manage-profile/security/api-tokens"
                   target="_blank"
                   rel="noreferrer"
                   className="link-highlight"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
                 >
-                  Atlassian API Tokens ↗
+                  Atlassian API Tokens <ExternalLink size={11} />
                 </a>
                 , click <em>Create API token</em>, and paste it below.
               </div>
@@ -558,8 +618,17 @@ export default function SetupWizard({ onComplete }) {
                   className="action-btn"
                   onClick={handleTestJira}
                   disabled={testingJira || !formData.jira_base_url || !formData.jira_email || !formData.jira_api_token}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  {testingJira ? "Connecting to Jira..." : "⚡ Test Jira Connection"}
+                  {testingJira ? (
+                    <>
+                      <Loader2 size={15} className="spin" /> Connecting to Jira...
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={15} /> Test Jira Connection
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -570,14 +639,18 @@ export default function SetupWizard({ onComplete }) {
                 >
                   {jiraTestResult.success ? (
                     <div>
-                      <div className="box-title">✅ Jira Connection Verified!</div>
+                      <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <CheckCircle2 size={16} color="var(--success, #10b981)" /> Jira Connection Verified!
+                      </div>
                       <div className="box-sub">
                         Authenticated as: <strong>{jiraTestResult.display_name}</strong> ({jiraTestResult.email})
                       </div>
                     </div>
                   ) : (
                     <div>
-                      <div className="box-title">❌ Jira Connection Failed</div>
+                      <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <XCircle size={16} color="var(--danger, #ef4444)" /> Jira Connection Failed
+                      </div>
                       <div className="box-sub">{jiraTestResult.error}</div>
                     </div>
                   )}
@@ -590,7 +663,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 3 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🧠</span>
+                <span className="step-icon">
+                  <Brain size={24} />
+                </span>
                 <div>
                   <h3 className="step-heading">AI & LLM Provider</h3>
                   <p className="step-desc">
@@ -607,7 +682,9 @@ export default function SetupWizard({ onComplete }) {
                 >
                   <input type="radio" name="provider" checked={formData.llm_provider === "groq"} readOnly />
                   <div className="provider-info">
-                    <span className="provider-name">⚡ Groq (Recommended - Free & Fast)</span>
+                    <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <Zap size={15} /> Groq (Recommended - Free & Fast)
+                    </span>
                     <span className="provider-desc">Ultra-fast inference with Llama 3 / GPT-OSS models.</span>
                   </div>
                 </label>
@@ -627,7 +704,9 @@ export default function SetupWizard({ onComplete }) {
                     readOnly
                   />
                   <div className="provider-info">
-                    <span className="provider-name">🤖 OpenAI (Official)</span>
+                    <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <Bot size={15} /> OpenAI (Official)
+                    </span>
                     <span className="provider-desc">GPT-4o, GPT-4o-mini via OpenAI API.</span>
                   </div>
                 </label>
@@ -647,7 +726,9 @@ export default function SetupWizard({ onComplete }) {
                     readOnly
                   />
                   <div className="provider-info">
-                    <span className="provider-name">✨ Google Gemini (Free Tier)</span>
+                    <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <Sparkles size={15} /> Google Gemini (Free Tier)
+                    </span>
                     <span className="provider-desc">Gemini 2.5 Flash via AI Studio OpenAI compatibility.</span>
                   </div>
                 </label>
@@ -658,7 +739,9 @@ export default function SetupWizard({ onComplete }) {
                 >
                   <input type="radio" name="provider" checked={formData.llm_provider === "anthropic"} readOnly />
                   <div className="provider-info">
-                    <span className="provider-name">🔮 Anthropic Claude</span>
+                    <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <Cpu size={15} /> Anthropic Claude
+                    </span>
                     <span className="provider-desc">Claude 3.5 Sonnet / Claude 3.5 Haiku.</span>
                   </div>
                 </label>
@@ -669,7 +752,9 @@ export default function SetupWizard({ onComplete }) {
                 >
                   <input type="radio" name="provider" checked={formData.llm_provider === "mock"} readOnly />
                   <div className="provider-info">
-                    <span className="provider-name">🧪 Offline Mock (Zero Cost)</span>
+                    <span className="provider-name" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <FlaskConical size={15} /> Offline Mock (Zero Cost)
+                    </span>
                     <span className="provider-desc">Simulated responses without any external API keys.</span>
                   </div>
                 </label>
@@ -739,16 +824,16 @@ export default function SetupWizard({ onComplete }) {
                         {formData.llm_provider === "groq" && (
                           <span className="field-hint">
                             Get a free Groq key at{" "}
-                            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">
-                              console.groq.com/keys ↗
+                            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                              console.groq.com/keys <ExternalLink size={11} />
                             </a>
                           </span>
                         )}
                         {formData.openai_base_url.includes("google") && (
                           <span className="field-hint">
                             Get a free Gemini API key at{" "}
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">
-                              aistudio.google.com ↗
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                              aistudio.google.com <ExternalLink size={11} />
                             </a>
                           </span>
                         )}
@@ -796,8 +881,17 @@ export default function SetupWizard({ onComplete }) {
                           ? !formData.anthropic_api_key
                           : !formData.openai_api_key)
                       }
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                     >
-                      {testingLlm ? "Testing AI connection..." : "🤖 Test AI Model Ping"}
+                      {testingLlm ? (
+                        <>
+                          <Loader2 size={15} className="spin" /> Testing AI connection...
+                        </>
+                      ) : (
+                        <>
+                          <Bot size={15} /> Test AI Model Ping
+                        </>
+                      )}
                     </button>
                   </div>
 
@@ -808,14 +902,18 @@ export default function SetupWizard({ onComplete }) {
                     >
                       {llmTestResult.success ? (
                         <div>
-                          <div className="box-title">✅ AI Provider Connected Successfully!</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <CheckCircle2 size={16} color="var(--success, #10b981)" /> AI Provider Connected Successfully!
+                          </div>
                           <div className="box-sub">
                             Model: <code>{llmTestResult.model}</code> | Response: "{llmTestResult.reply}"
                           </div>
                         </div>
                       ) : (
                         <div>
-                          <div className="box-title">❌ AI Connection Failed</div>
+                          <div className="box-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <XCircle size={16} color="var(--danger, #ef4444)" /> AI Connection Failed
+                          </div>
                           <div className="box-sub">{llmTestResult.error}</div>
                         </div>
                       )}
@@ -830,7 +928,9 @@ export default function SetupWizard({ onComplete }) {
           {step === 4 && (
             <div className="wizard-step-content">
               <div className="step-intro">
-                <span className="step-icon">🚀</span>
+                <span className="step-icon">
+                  <Rocket size={24} />
+                </span>
                 <div>
                   <h3 className="step-heading">Review & Complete Setup</h3>
                   <p className="step-desc">
@@ -841,7 +941,9 @@ export default function SetupWizard({ onComplete }) {
 
               <div className="summary-card">
                 <div className="summary-row">
-                  <span className="summary-label">🐙 GitHub Source:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <GithubLogo size={16} weight="bold" /> GitHub Source:
+                  </span>
                   <span className="summary-value">
                     {formData.github_source_type === "org"
                       ? `Org / Account: ${formData.github_org_or_user || "Default"}`
@@ -849,21 +951,29 @@ export default function SetupWizard({ onComplete }) {
                   </span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">📦 Synced Repositories:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <FolderGit2 size={15} /> Synced Repositories:
+                  </span>
                   <span className="summary-value">
                     {repoValidation?.repo_count || 0} repository(ies) active in workspace
                   </span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">🎫 Jira Cloud Workspace:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Ticket size={15} /> Jira Cloud Workspace:
+                  </span>
                   <span className="summary-value">{formData.jira_base_url || "Not configured"}</span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">📧 Jira Account:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Mail size={15} /> Jira Account:
+                  </span>
                   <span className="summary-value">{formData.jira_email || "Not configured"}</span>
                 </div>
                 <div className="summary-row">
-                  <span className="summary-label">🧠 AI Provider:</span>
+                  <span className="summary-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Brain size={15} /> AI Provider:
+                  </span>
                   <span className="summary-value">
                     <strong>{formData.llm_provider.toUpperCase()}</strong> ({formData.llm_model})
                   </span>
@@ -904,7 +1014,14 @@ export default function SetupWizard({ onComplete }) {
               </div>
 
               <div className="callout callout-info" style={{ marginTop: "16px" }}>
-                <strong>⚙️ Need to change these later?</strong> You can open the Settings menu anytime from the <strong>⚙️ Settings</strong> button in the top navigation bar.
+                <strong style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <Settings size={15} /> Need to change these later?
+                </strong>{" "}
+                You can open the Settings menu anytime from the{" "}
+                <strong style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <Settings size={14} /> Settings
+                </strong>{" "}
+                button in the top navigation bar.
               </div>
             </div>
           )}
@@ -918,8 +1035,9 @@ export default function SetupWizard({ onComplete }) {
               className="btn-secondary"
               onClick={() => setStep((s) => s - 1)}
               disabled={saving}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
-              ← Back
+              <ArrowLeft size={16} /> Back
             </button>
           ) : (
             <div />
@@ -928,10 +1046,11 @@ export default function SetupWizard({ onComplete }) {
           {step < totalSteps ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {!canContinue && (
-                <span style={{ fontSize: "12px", color: "var(--danger, #f87171)", fontWeight: 600 }}>
-                  {step === 1 && "⚠️ Authenticate & sync at least 1 GitHub repository"}
-                  {step === 2 && "⚠️ Fill Jira URL, Email, and Token to proceed"}
-                  {step === 3 && `⚠️ Enter API Key for ${formData.llm_provider}`}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: "12px", color: "var(--danger, #f87171)", fontWeight: 600 }}>
+                  <AlertCircle size={14} />
+                  {step === 1 && "Authenticate & sync at least 1 GitHub repository"}
+                  {step === 2 && "Fill Jira URL, Email, and Token to proceed"}
+                  {step === 3 && `Enter API Key for ${formData.llm_provider}`}
                 </span>
               )}
               <button
@@ -939,9 +1058,9 @@ export default function SetupWizard({ onComplete }) {
                 className="btn-primary"
                 onClick={() => setStep((s) => s + 1)}
                 disabled={!canContinue}
-                style={{ opacity: canContinue ? 1 : 0.5, cursor: canContinue ? "pointer" : "not-allowed" }}
+                style={{ opacity: canContinue ? 1 : 0.5, cursor: canContinue ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
-                Continue to Step {step + 1} →
+                Continue to Step {step + 1} <ArrowRight size={16} />
               </button>
             </div>
           ) : (
@@ -950,8 +1069,17 @@ export default function SetupWizard({ onComplete }) {
               className="btn-primary-finish"
               onClick={handleSaveAndFinish}
               disabled={saving}
+              style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
             >
-              {saving ? "Saving Configuration..." : "✨ Save & Launch Dashboard"}
+              {saving ? (
+                <>
+                  <Loader2 size={16} className="spin" /> Saving Configuration...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={16} /> Save & Launch Dashboard
+                </>
+              )}
             </button>
           )}
         </div>

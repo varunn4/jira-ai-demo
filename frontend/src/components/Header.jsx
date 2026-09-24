@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth.jsx";
 import { hasAnyDashboardTab } from "../lib/tabs";
-import logo from "../assets/logo.jpeg";
+import logo from "../assets/logo.png";
 import SettingsModal from "./SettingsModal.jsx";
 
 export default function Header({ title = "AI Admin", onSettingsSaved }) {

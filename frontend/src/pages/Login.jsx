@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useAuth } from "../auth.jsx";
-import logo from "../assets/logo.jpeg";
+import logo from "../assets/logo.png";
 
 export default function Login() {
   const { user, login } = useAuth();
