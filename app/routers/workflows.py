@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from app.config import settings
 from app.dev_pr_gate import pr_context, pr_gate
@@ -341,3 +341,148 @@ def slack_chat_message(request: SlackMessageRequest) -> SlackMessageResponse:
     except Exception as exc:
         log.exception("/chat/slack-message failed")
         raise HTTPException(status_code=500, detail=f"Failed to process Slack message: {exc}") from exc
+
+
+# ─── Slack Events API Webhook (Direct Bot Integration) ────────────────────────
+
+def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None) -> None:
+    """Asynchronous background worker for handling incoming Slack events."""
+    text = str(event.get("text") or "").strip()
+    channel_id = str(event.get("channel") or "")
+    user_id = str(event.get("user") or "")
+    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+
+    if not channel_id or not text or not user_id:
+        return
+
+    log.info(
+        "Processing Slack event: user=%s channel=%s thread_ts=%s text=%r",
+        user_id,
+        channel_id,
+        thread_ts,
+        text[:80],
+    )
+
+    slack_client = SlackClient(settings)
+
+    # 1. Check if the thread corresponds to an active Jira ticket in DB
+    ticket_found = False
+    if thread_ts:
+        try:
+            replier = Workflow2Replier(settings=settings, prompt_store=prompt_store)
+            res = replier.reply(
+                Workflow2ReplyRequest(
+                    slack_thread_ts=thread_ts,
+                    slack_channel_id=channel_id,
+                    user_message=text,
+                    user_id=user_id,
+                )
+            )
+            bot_reply = str(res.get("reply") or "").strip()
+            if bot_reply:
+                slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=thread_ts)
+                ticket_found = True
+        except LookupError:
+            ticket_found = False
+        except Exception as exc:
+            log.warning("Workflow2Replier error in slack event: %s", exc)
+
+    if ticket_found:
+        return
+
+    # 2. Check if message references a Jira issue key like PROJ-123
+    import re
+    jira_keys = re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", text)
+    if jira_keys:
+        issue_key = jira_keys[0]
+        log.info("Detected Jira ticket key in Slack message: %s", issue_key)
+        try:
+            from app.jira_client import JiraClient
+            jira_client = JiraClient(settings)
+            if jira_client.is_configured():
+                issue = jira_client.get_issue(issue_key)
+                fields = issue.get("fields") or {}
+                summary = fields.get("summary", "")
+                status_name = (fields.get("status") or {}).get("name", "Open")
+
+                llm = build_llm_client(settings)
+                prompt = (
+                    f"User message: {text}\n\n"
+                    f"Jira Ticket Key: {issue_key}\n"
+                    f"Summary: {summary}\n"
+                    f"Status: {status_name}\n\n"
+                    f"As an AI Scrum Master & Delivery Governor, provide a helpful, concise response."
+                )
+                bot_reply = llm.complete(
+                    system_prompt="You are AI Governor, an autonomous Scrum Master and delivery governance agent.",
+                    user_message=prompt,
+                    max_tokens=250,
+                ).strip()
+                slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=thread_ts)
+                return
+        except Exception as exc:
+            log.warning("Failed processing Jira key lookup: %s", exc)
+
+    # 3. Fallback: General AI Governor Scrum Master conversational reply
+    try:
+        llm = build_llm_client(settings)
+        bot_reply = llm.complete(
+            system_prompt=(
+                "You are AI Governor, an autonomous Scrum Master and delivery governor assisting the team on Slack. "
+                "Keep replies concise (2-4 sentences max), professional, actionable, and friendly."
+            ),
+            user_message=text,
+            max_tokens=150,
+        ).strip()
+        slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=thread_ts)
+    except Exception as exc:
+        log.exception("Failed to send conversational Slack reply: %s", exc)
+
+
+@router.post("/slack/events")
+@router.post("/api/slack/events")
+async def slack_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> Any:
+    """Slack Events API webhook endpoint.
+    
+    Handles:
+    - url_verification: Returns challenge back to Slack for URL validation.
+    - event_callback: Dispatches message / app_mention processing to background tasks.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        log.warning("Invalid JSON received at /slack/events")
+        return {"ok": False, "error": "invalid_json"}
+
+    event_type = body.get("type")
+
+    # 1. Handle URL Verification challenge
+    if event_type == "url_verification":
+        challenge = body.get("challenge")
+        log.info("Received Slack url_verification challenge: %s", challenge)
+        return {"challenge": challenge}
+
+    # 2. Handle Event Callback
+    if event_type == "event_callback":
+        event = body.get("event", {})
+        # Filter out bot messages, bot subtypes, and message edits to prevent infinite loops
+        if (
+            event.get("bot_id")
+            or event.get("subtype") in ("bot_message", "message_changed", "message_deleted")
+            or event.get("bot_profile")
+        ):
+            return {"ok": True, "status": "ignored_bot"}
+
+        # Dispatch background processing task
+        background_tasks.add_task(
+            _process_slack_event_async,
+            event=event,
+            team_id=body.get("team_id"),
+        )
+        return {"ok": True, "status": "enqueued"}
+
+    return {"ok": True, "status": "unhandled_event_type"}
+

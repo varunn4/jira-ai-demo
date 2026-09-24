@@ -71,11 +71,14 @@ def get_setup_status(_user: CurrentUser = Depends(require_tab("repos"))) -> dict
         if not openai_key and not anthropic_key:
             missing.append("llm")
 
-    # Setup is complete only if setup_completed is marked true AND all mandatory sections are configured
+    # Setup is complete if user has already marked it done, or has configured settings, or has dismissed it
     is_setup_done = db_items.get("setup_completed") == "true"
+    has_any_config = bool(jira_url or db_items.get("openai_api_key") or db_items.get("anthropic_api_key") or repos)
+
+    setup_is_complete = is_setup_done or (has_any_config and len(missing) == 0)
 
     return {
-        "setup_complete": is_setup_done and len(missing) == 0,
+        "setup_complete": setup_is_complete,
         "missing_sections": missing,
         "repository_configured": "repositories" not in missing,
         "jira_configured": "jira" not in missing,
@@ -461,81 +464,12 @@ def test_n8n_connection(
         return {"success": False, "error": f"Failed to reach n8n: {exc}"}
 
 
-@router.post("/test-zoho")
-def test_zoho_connection(
-    payload: dict[str, Any],
-    _user: CurrentUser = Depends(require_tab("repos")),
-) -> dict[str, Any]:
-    """Test Zoho Desk OAuth token refresh and organization connection with provided credentials."""
-    user_id = getattr(_user, "id", None)
-    user_email = getattr(_user, "email", None)
-    db_items = get_all_user_settings(settings, user_id=user_id, user_email=user_email)
+# @router.post("/test-zoho")
+# def test_zoho_connection(
+#     payload: dict[str, Any],
+#     _user: CurrentUser = Depends(require_tab("repos")),
+# ) -> dict[str, Any]:
+#     """Test Zoho Desk OAuth token refresh and organization connection with provided credentials."""
+#     return {"success": False, "error": "Zoho integration is currently disabled."}
 
-    client_id = (payload.get("zoho_client_id") or db_items.get("zoho_client_id") or settings.zoho_client_id or "").strip()
-
-    client_secret = (payload.get("zoho_client_secret") or "").strip()
-    if not client_secret or "..." in client_secret:
-        client_secret = (db_items.get("zoho_client_secret") or settings.zoho_client_secret or "").strip()
-
-    refresh_token = (payload.get("zoho_refresh_token") or "").strip()
-    if not refresh_token or "..." in refresh_token:
-        refresh_token = (db_items.get("zoho_refresh_token") or settings.zoho_refresh_token or "").strip()
-
-    org_id = (payload.get("zoho_org_id") or db_items.get("zoho_org_id") or settings.zoho_org_id or "").strip()
-    accounts_base = (payload.get("zoho_accounts_base") or db_items.get("zoho_accounts_base") or settings.zoho_accounts_base or "https://accounts.zoho.in").strip().rstrip("/")
-    desk_base = (payload.get("zoho_desk_base") or db_items.get("zoho_desk_base") or settings.zoho_desk_base or "https://desk.zoho.in").strip().rstrip("/")
-
-    if not client_id:
-        return {"success": False, "error": "Zoho Client ID is required."}
-    if not client_secret:
-        return {"success": False, "error": "Zoho Client Secret is required."}
-    if not refresh_token:
-        return {"success": False, "error": "Zoho Refresh Token is required."}
-    if not org_id:
-        return {"success": False, "error": "Zoho Org ID is required."}
-
-    # Step 1: Test OAuth token refresh
-    try:
-        resp = requests.post(
-            f"{accounts_base}/oauth/v2/token",
-            params={
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "grant_type": "refresh_token",
-            },
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return {"success": False, "error": f"OAuth token refresh failed (HTTP {resp.status_code}): {resp.text[:250]}"}
-
-        data = resp.json()
-        access_token = data.get("access_token")
-        if not access_token:
-            err_msg = data.get("error") or data.get("message") or str(data)
-            return {"success": False, "error": f"Zoho returned error during token refresh: {err_msg}"}
-
-        # Step 2: Test API call with access token to verify Org ID and Desk permissions
-        # Try contact search with limit 1 as verified check for Desk.search.READ / Desk.contacts.READ
-        search_resp = requests.get(
-            f"{desk_base}/api/v1/contacts/search",
-            headers={"Authorization": f"Zoho-oauthtoken {access_token}", "orgId": org_id},
-            params={"limit": 1},
-            timeout=10,
-        )
-        if search_resp.status_code not in (200, 204):
-            return {
-                "success": False,
-                "error": f"Zoho Desk API check failed for Org ID '{org_id}' (HTTP {search_resp.status_code}): {search_resp.text[:250]}",
-            }
-
-        return {
-            "success": True,
-            "message": f"Successfully authenticated with Zoho Desk! (Org ID: {org_id})",
-            "org_id": org_id,
-        }
-    except requests.exceptions.Timeout:
-        return {"success": False, "error": f"Connection timed out reaching Zoho accounts ({accounts_base}) or Desk ({desk_base})."}
-    except Exception as exc:
-        return {"success": False, "error": f"Zoho validation failed: {exc}"}
 

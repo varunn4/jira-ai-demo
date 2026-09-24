@@ -229,24 +229,56 @@ class MockLLMClient:
 
 
 def build_llm_client(settings: Settings, *, timeout_override: int | None = None) -> LLMClient:
-    provider = settings.llm_provider.lower().strip()
-    log.info("Building LLM client: provider=%s model=%s timeout=%s", provider, settings.llm_model,
-             timeout_override if timeout_override is not None else settings.llm_timeout_seconds)
+    scoped = settings
+    # Dynamically resolve database settings overrides if configured
+    try:
+        from app.app_settings import get_all_settings
+        db_items = get_all_settings(settings)
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        with psycopg2.connect(settings.database_url) as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT key, value FROM app_user_settings WHERE key IN ('llm_provider', 'llm_model', 'openai_api_key', 'openai_base_url', 'anthropic_api_key', 'anthropic_model');")
+                for r in cur.fetchall():
+                    if r.get("key") and r.get("value"):
+                        db_items[r["key"]] = r["value"]
+
+        updates: dict[str, Any] = {}
+        if db_items.get("llm_provider"):
+            updates["llm_provider"] = db_items["llm_provider"]
+        if db_items.get("llm_model"):
+            updates["llm_model"] = db_items["llm_model"]
+        if db_items.get("openai_api_key"):
+            updates["openai_api_key"] = db_items["openai_api_key"]
+        if db_items.get("openai_base_url") is not None:
+            updates["openai_base_url"] = db_items["openai_base_url"]
+        if db_items.get("anthropic_api_key"):
+            updates["anthropic_api_key"] = db_items["anthropic_api_key"]
+        if db_items.get("anthropic_model"):
+            updates["anthropic_model"] = db_items["anthropic_model"]
+        if updates:
+            scoped = dataclasses.replace(settings, **updates)
+    except Exception:
+        pass
+
+    provider = scoped.llm_provider.lower().strip()
+    log.info("Building LLM client: provider=%s model=%s timeout=%s", provider, scoped.llm_model,
+             timeout_override if timeout_override is not None else scoped.llm_timeout_seconds)
 
     if provider in ("openai", "groq", "gemini"):
-        if not settings.openai_api_key:
+        if not scoped.openai_api_key:
             log.warning("No OPENAI_API_KEY configured for provider=%s; using MockLLMClient", provider)
             return MockLLMClient()
-        return OpenAILLMClient(settings, timeout_override=timeout_override)
+        return OpenAILLMClient(scoped, timeout_override=timeout_override)
 
     if provider == "anthropic":
-        if not settings.anthropic_api_key:
-            if settings.openai_api_key:
+        if not scoped.anthropic_api_key:
+            if scoped.openai_api_key:
                 log.info("No ANTHROPIC_API_KEY configured, but OPENAI_API_KEY found. Routing to OpenAI client.")
-                return OpenAILLMClient(settings, timeout_override=timeout_override)
+                return OpenAILLMClient(scoped, timeout_override=timeout_override)
             log.warning("No ANTHROPIC_API_KEY configured for provider=anthropic; using MockLLMClient")
             return MockLLMClient()
-        return AnthropicLLMClient(settings, timeout_override=timeout_override)
+        return AnthropicLLMClient(scoped, timeout_override=timeout_override)
 
     if provider == "mock":
         log.warning("LLM_PROVIDER=mock — no real LLM calls will be made")

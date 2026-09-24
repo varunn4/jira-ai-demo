@@ -7,6 +7,7 @@ project does not read environment variables directly.
 
 import os
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
@@ -296,11 +297,13 @@ class Settings:
     # the current exchange rate.
     usd_to_inr: float = float(os.getenv("USD_TO_INR", "95.75"))
 
+    # ── n8n Workflow Automation Monitor ─────────────────────────────────────
+    n8n_base_url: str = os.getenv("N8N_BASE_URL", "")
+    n8n_api_key: str = os.getenv("N8N_API_KEY", "")
+    n8n_monitor_timeout_seconds: int = int(os.getenv("N8N_MONITOR_TIMEOUT_SECONDS", "10"))
+    n8n_monitor_execution_window: int = int(os.getenv("N8N_MONITOR_EXECUTION_WINDOW", "250"))
+
     # ── Zoho Desk (customer ticket visibility) ───────────────────────────────
-    # OAuth self-client credentials + org id for the Zoho Desk REST API. The
-    # "zoho" tab looks a customer up by email/phone and lists their tickets.
-    # Data-center domains default to India (.in); switch to .com/.eu/etc. per
-    # deployment. Leaving credentials blank degrades the tab gracefully.
     zoho_client_id: str = os.getenv("ZOHO_CLIENT_ID", "")
     zoho_client_secret: str = os.getenv("ZOHO_CLIENT_SECRET", "")
     zoho_refresh_token: str = os.getenv("ZOHO_REFRESH_TOKEN", "")
@@ -321,18 +324,53 @@ class Settings:
         credentials = f"{username}:{password}" if password else username
         return f"postgresql://{credentials}@{self.db_host}:{self.db_port}/{self.db_name}"
 
+    def __post_init__(self) -> None:
+        self.apply_dynamic_overrides()
+
     def apply_dynamic_overrides(self) -> None:
-        """Load and apply dynamic configuration overrides from app_settings table."""
+        """Load and apply dynamic configuration overrides from app_settings and app_user_settings tables."""
+        if not self.database_url:
+            return
         try:
-            from app.app_settings import get_all_settings
-            db_settings = get_all_settings(self)
-            for k, v in db_settings.items():
+            import psycopg
+            from psycopg.rows import dict_row
+
+            merged: dict[str, Any] = {}
+            with psycopg.connect(self.database_url, row_factory=dict_row) as conn:
+                # 1. Global app_settings
+                try:
+                    for r in conn.execute(
+                        "SELECT key, value FROM app_settings WHERE value IS NOT NULL AND TRIM(value) != ''"
+                    ).fetchall():
+                        if r.get("key") and r.get("value"):
+                            merged[r["key"]] = str(r["value"]).strip()
+                except Exception:
+                    pass
+
+                # 2. Latest user settings from app_user_settings
+                try:
+                    for r in conn.execute(
+                        "SELECT key, value FROM app_user_settings WHERE value IS NOT NULL AND TRIM(value) != '' ORDER BY updated_at ASC NULLS LAST"
+                    ).fetchall():
+                        if r.get("key") and r.get("value"):
+                            merged[r["key"]] = str(r["value"]).strip()
+                except Exception:
+                    pass
+
+            # Convenient aliases
+            if "slack_channel_id" in merged and not merged.get("slack_default_channel_id"):
+                merged["slack_default_channel_id"] = merged["slack_channel_id"]
+            if "slack_channel_id" in merged and not merged.get("governor_notify_channel_id"):
+                merged["governor_notify_channel_id"] = merged["slack_channel_id"]
+            if "jira_project_key" in merged and not merged.get("jira_project_keys"):
+                merged["jira_project_keys"] = merged["jira_project_key"]
+
+            for k, v in merged.items():
                 if v is None:
                     continue
                 v_str = str(v).strip()
                 if not v_str:
                     continue
-                # Map db key (e.g. jira_base_url) to Settings field
                 if hasattr(self, k):
                     curr_val = getattr(self, k)
                     if isinstance(curr_val, bool):
@@ -361,4 +399,5 @@ def reload_settings() -> Settings:
     """Reload dynamic overrides into the global settings singleton."""
     settings.apply_dynamic_overrides()
     return settings
+
 

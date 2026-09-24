@@ -35,18 +35,36 @@ class SlackProbeResult:
 
 
 class SlackClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, override_token: str | None = None) -> None:
         self.settings = settings
+        self._override_token = override_token
+
+    def _get_token(self) -> str | None:
+        if self._override_token:
+            return self._override_token
+        if self.settings.slack_bot_token:
+            return self.settings.slack_bot_token
+        # Try dynamic settings from database
+        try:
+            from app.app_settings import get_all_settings
+            db_items = get_all_settings(self.settings)
+            if db_items.get("slack_bot_token"):
+                return db_items["slack_bot_token"]
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            with psycopg2.connect(self.settings.database_url) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT value FROM app_user_settings WHERE key = 'slack_bot_token' LIMIT 1;")
+                    row = cur.fetchone()
+                    if row and row.get("value"):
+                        return row["value"]
+        except Exception:
+            pass
+        return None
 
     def probe_channel(self, *, channel_id: str, text: str) -> SlackProbeResult:
-        """Attempt a chat.postMessage and report success/failure without raising.
-
-        Unlike :meth:`post_message`, this never raises on a Slack API error so a
-        caller can sweep many channels and flag the ones that fail (e.g.
-        ``not_in_channel``, ``channel_not_found``). Used by the Channel Health
-        check exposed in the admin panel.
-        """
-        if not self.settings.slack_bot_token:
+        token = self._get_token()
+        if not token:
             # If mock channels are used or no token is present, allow testing with realistic simulation
             if "DEMO" in channel_id or "DEV" in channel_id or "DM" in channel_id:
                 return SlackProbeResult(
@@ -56,14 +74,6 @@ class SlackClient:
                     message_ts=f"{datetime.now(timezone.utc).timestamp():.6f}",
                     raw={"ok": True, "mock": True},
                 )
-            if "QA" in channel_id:
-                return SlackProbeResult(
-                    channel_id=channel_id,
-                    ok=False,
-                    error="not_in_channel",
-                    message_ts=None,
-                    raw={"ok": False, "error": "not_in_channel", "mock": True},
-                )
             return SlackProbeResult(
                 channel_id=channel_id,
                 ok=False,
@@ -72,28 +82,11 @@ class SlackClient:
                 raw={"ok": False, "reason": "SLACK_BOT_TOKEN is not configured"},
             )
 
-        if self.settings.slack_bot_token.startswith("mock") or self.settings.slack_bot_token.startswith("xoxb-mock"):
-            if "QA" in channel_id or "INVALID" in channel_id:
-                return SlackProbeResult(
-                    channel_id=channel_id,
-                    ok=False,
-                    error="not_in_channel",
-                    message_ts=None,
-                    raw={"ok": False, "error": "not_in_channel", "mock": True},
-                )
-            return SlackProbeResult(
-                channel_id=channel_id,
-                ok=True,
-                error=None,
-                message_ts=f"{datetime.now(timezone.utc).timestamp():.6f}",
-                raw={"ok": True, "mock": True},
-            )
-
         try:
             response = requests.post(
                 "https://slack.com/api/chat.postMessage",
                 headers={
-                    "Authorization": f"Bearer {self.settings.slack_bot_token}",
+                    "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json; charset=utf-8",
                 },
                 json={"channel": channel_id, "text": text},
@@ -121,8 +114,16 @@ class SlackClient:
             raw=data,
         )
 
-    def post_message(self, *, channel_id: str, text: str, thread_ts: str | None = None) -> SlackPostResult:
-        if not self.settings.slack_bot_token:
+    def post_message(
+        self,
+        *,
+        channel_id: str,
+        text: str,
+        thread_ts: str | None = None,
+        override_token: str | None = None,
+    ) -> SlackPostResult:
+        token = override_token or self._get_token()
+        if not token:
             log.warning(
                 "SLACK_BOT_TOKEN not configured; skipping post_message to channel=%s (dry run)",
                 channel_id,
@@ -145,7 +146,7 @@ class SlackClient:
         response = requests.post(
             "https://slack.com/api/chat.postMessage",
             headers={
-                "Authorization": f"Bearer {self.settings.slack_bot_token}",
+                "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json; charset=utf-8",
             },
             json={

@@ -25,9 +25,26 @@ import requests
 from docx import Document
 from docx.shared import Pt, RGBColor
 
-JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "")
-JIRA_EMAIL = os.environ.get("JIRA_EMAIL", "")
-JIRA_API_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
+def _get_jira_config() -> tuple[str, str, str]:
+    from app.config import settings
+    from app.app_settings import get_all_settings
+    db_items = get_all_settings(settings)
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        with psycopg2.connect(settings.database_url) as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT key, value FROM app_user_settings WHERE key LIKE 'jira_%';")
+                for r in cur.fetchall():
+                    db_items[r["key"]] = r["value"]
+    except Exception:
+        pass
+
+    url = (db_items.get("jira_base_url") or settings.jira_base_url or "").rstrip("/")
+    email = db_items.get("jira_email") or settings.jira_email or ""
+    token = db_items.get("jira_api_token") or settings.jira_api_token or ""
+    return url, email, token
+
 JIRA_TIMEOUT = 60
 
 ATTACH_COMMENT_MARKER = "AI-GOVERNOR-TC-DOC-V1"
@@ -106,10 +123,11 @@ def build_testcase_docx(
 
 def attach_to_jira(issue_key: str, filename: str, content: bytes) -> dict[str, Any]:
     """Upload a file to the Jira issue. Returns the created attachment metadata."""
-    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}/attachments"
+    jira_base_url, jira_email, jira_token = _get_jira_config()
+    url = f"{jira_base_url}/rest/api/3/issue/{issue_key}/attachments"
     resp = requests.post(
         url,
-        auth=(JIRA_EMAIL, JIRA_API_TOKEN),
+        auth=(jira_email, jira_token),
         headers={"X-Atlassian-Token": "no-check", "Accept": "application/json"},
         files={"file": (filename, content,
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
@@ -121,17 +139,13 @@ def attach_to_jira(issue_key: str, filename: str, content: bytes) -> dict[str, A
 
 
 def _existing_testcase_attachment(issue_key: str, filename: str) -> dict[str, Any] | None:
-    """Return an already-attached test-case doc for this issue, if any.
-
-    The QA gate now fires on *any* QA-related status (Ready to QA, In QA
-    (Staging), In QA (Preprod), ...), so the ticket can re-enter this flow
-    several times. We treat the doc as already produced if an attachment with
-    our generated filename exists, to avoid stacking duplicate .docx files."""
-    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}"
+    """Return an already-attached test-case doc for this issue, if any."""
+    jira_base_url, jira_email, jira_token = _get_jira_config()
+    url = f"{jira_base_url}/rest/api/3/issue/{issue_key}"
     try:
         resp = requests.get(
             url,
-            auth=(JIRA_EMAIL, JIRA_API_TOKEN),
+            auth=(jira_email, jira_token),
             headers={"Accept": "application/json"},
             params={"fields": "attachment"},
             timeout=JIRA_TIMEOUT,
@@ -153,8 +167,9 @@ def _post_pointer_comment(
     """A short comment linking the attached document (idempotent via marker)."""
     meta = _phase_meta(phase)
     marker = meta["marker"]
-    auth = (JIRA_EMAIL, JIRA_API_TOKEN)
-    base = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_key}/comment"
+    jira_base_url, jira_email, jira_token = _get_jira_config()
+    auth = (jira_email, jira_token)
+    base = f"{jira_base_url}/rest/api/2/issue/{issue_key}/comment"
     att_id = attachment.get("id")
     fname = attachment.get("filename", "test-cases.docx")
     # Jira renders [^filename] as an inline link to the attachment.

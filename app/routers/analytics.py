@@ -111,9 +111,11 @@ def graph_admin_n8n_workflows(
     _user: CurrentUser = Depends(require_tab("workflows")),
 ) -> N8nMonitorResponse:
     """List n8n workflows and recent execution metrics."""
+    from app.config import reload_settings
     from app.n8n_monitor import N8nMonitor, N8nMonitorError
 
-    monitor = N8nMonitor(settings)
+    current_settings = reload_settings()
+    monitor = N8nMonitor(current_settings)
     try:
         data = monitor.overview()
         return N8nMonitorResponse(**data)

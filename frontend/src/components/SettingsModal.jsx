@@ -382,12 +382,12 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           >
             🎫 Jira Cloud
           </button>
-          <button
+          {/* <button
             className={`modal-tab-btn ${activeTab === "zoho" ? "active" : ""}`}
             onClick={() => setActiveTab("zoho")}
           >
             🎟️ Zoho Desk
-          </button>
+          </button> */}
           <button
             className={`modal-tab-btn ${activeTab === "llm" ? "active" : ""}`}
             onClick={() => setActiveTab("llm")}
@@ -398,7 +398,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
             className={`modal-tab-btn ${activeTab === "integrations" ? "active" : ""}`}
             onClick={() => setActiveTab("integrations")}
           >
-            💬 Slack & Vector DB
+            💬 Slack Integration
           </button>
         </div>
 
@@ -707,182 +707,14 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                 </div>
               )}
 
-              {/* TAB: Zoho Desk */}
+              {/* TAB: Zoho Desk (Commented out)
               {activeTab === "zoho" && (
                 <div className="settings-section">
                   <div className="callout callout-info">
                     <strong>🎟️ Zoho Desk OAuth 2.0 Integration:</strong> Connect to Zoho Desk to look up customer tickets, conversations, and statuses directly within the platform.
-                    <div style={{ marginTop: "6px", fontSize: "12px" }}>
-                      Create a Self Client in{" "}
-                      <a
-                        href="https://api-console.zoho.in"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="link-highlight"
-                      >
-                        Zoho API Console (India) ↗
-                      </a>{" "}
-                      or{" "}
-                      <a
-                        href="https://api-console.zoho.com"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="link-highlight"
-                      >
-                        Global Console (.com) ↗
-                      </a>{" "}
-                      with scopes: <code>Desk.tickets.READ,Desk.contacts.READ,Desk.search.READ</code>
-                    </div>
                   </div>
-
-                  <div className="form-grid-2" style={{ marginTop: "14px" }}>
-                    <div className="form-group">
-                      <label className="field-label">Zoho Client ID</label>
-                      <input
-                        type="text"
-                        name="settings_zoho_client_id"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        className="field-input"
-                        placeholder="1000.XXXXXXXXXXXXXXXXXXXXXXXXXX"
-                        value={formData.zoho_client_id}
-                        onChange={(e) => handleChange("zoho_client_id", e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="field-label">Zoho Org ID (Portal / Organization ID)</label>
-                      <input
-                        type="text"
-                        name="settings_zoho_org_id"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        className="field-input"
-                        placeholder="e.g. 60021345678"
-                        value={formData.zoho_org_id}
-                        onChange={(e) => handleChange("zoho_org_id", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-grid-2">
-                    <div className="form-group">
-                      <label className="field-label">Zoho Client Secret</label>
-                      {meta.zoho_has_client_secret && !editSecrets.zoho_client_secret ? (
-                        <div className="secret-saved-row">
-                          <span className="secret-indicator">🔒 Secret configured in database (Masked)</span>
-                          <button
-                            type="button"
-                            className="btn-text-action"
-                            onClick={() => setEditSecrets((p) => ({ ...p, zoho_client_secret: true }))}
-                          >
-                            Change Secret
-                          </button>
-                        </div>
-                      ) : (
-                        <input
-                          type="password"
-                          name="settings_zoho_client_secret_field"
-                          autoComplete="new-password"
-                          data-lpignore="true"
-                          className="field-input"
-                          placeholder="Enter Zoho Client Secret..."
-                          value={formData.zoho_client_secret}
-                          onChange={(e) => handleChange("zoho_client_secret", e.target.value)}
-                        />
-                      )}
-                    </div>
-
-                    <div className="form-group">
-                      <label className="field-label">Zoho Refresh Token</label>
-                      {meta.zoho_has_refresh_token && !editSecrets.zoho_refresh_token ? (
-                        <div className="secret-saved-row">
-                          <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
-                          <button
-                            type="button"
-                            className="btn-text-action"
-                            onClick={() => setEditSecrets((p) => ({ ...p, zoho_refresh_token: true }))}
-                          >
-                            Change Token
-                          </button>
-                        </div>
-                      ) : (
-                        <input
-                          type="password"
-                          name="settings_zoho_refresh_token_field"
-                          autoComplete="new-password"
-                          data-lpignore="true"
-                          className="field-input"
-                          placeholder="1000.xxxxxxxxxxxxxxxxxxxxxxxx..."
-                          value={formData.zoho_refresh_token}
-                          onChange={(e) => handleChange("zoho_refresh_token", e.target.value)}
-                        />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="form-grid-2">
-                    <div className="form-group">
-                      <label className="field-label">Zoho Accounts Base URL</label>
-                      <input
-                        type="text"
-                        name="settings_zoho_accounts_base"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        className="field-input"
-                        placeholder="https://accounts.zoho.in (or .com / .eu)"
-                        value={formData.zoho_accounts_base}
-                        onChange={(e) => handleChange("zoho_accounts_base", e.target.value)}
-                      />
-                      <span className="field-hint">Default: https://accounts.zoho.in</span>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="field-label">Zoho Desk Base URL</label>
-                      <input
-                        type="text"
-                        name="settings_zoho_desk_base"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        className="field-input"
-                        placeholder="https://desk.zoho.in (or .com / .eu)"
-                        value={formData.zoho_desk_base}
-                        onChange={(e) => handleChange("zoho_desk_base", e.target.value)}
-                      />
-                      <span className="field-hint">Default: https://desk.zoho.in</span>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: "12px" }}>
-                    <button
-                      type="button"
-                      className="action-btn"
-                      onClick={handleTestZoho}
-                      disabled={testingZoho}
-                    >
-                      {testingZoho ? "Testing Zoho..." : "⚡ Test Zoho Desk Connection"}
-                    </button>
-                  </div>
-
-                  {zohoTestResult && (
-                    <div
-                      className={`validation-box ${zohoTestResult.success ? "box-success" : "box-danger"}`}
-                      style={{ marginTop: "12px" }}
-                    >
-                      {zohoTestResult.success ? (
-                        <div>
-                          <div className="box-title">✅ Zoho Desk Connected Successfully</div>
-                          <div className="box-sub">{zohoTestResult.message}</div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="box-title">❌ Zoho Desk Connection Failed</div>
-                          <div className="box-sub">{zohoTestResult.error}</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
-              )}
+              )} */}
 
               {/* TAB: AI / LLM */}
               {activeTab === "llm" && (
@@ -1130,6 +962,11 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                     </div>
                   </div>
 
+                  <div className="callout callout-info" style={{ marginTop: "14px" }}>
+                    <strong>💬 Slack Bot Integration:</strong> Alerts, reviews, and autonomous approvals are dispatched directly to your Slack channel. Replying in threads allows interactive requirement refinement.
+                  </div>
+
+                  {/* Infrastructure URLs (Handled automatically via server environment)
                   <div className="form-grid-2" style={{ marginTop: "14px" }}>
                     <div className="form-group">
                       <label className="field-label">Qdrant Vector DB URL</label>
@@ -1152,77 +989,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                       />
                     </div>
                   </div>
-
-                  <div style={{ marginTop: "20px", paddingTop: "14px", borderTop: "1px dashed var(--line)" }}>
-                    <div style={{ fontWeight: 600, fontSize: "13px", marginBottom: "10px", color: "var(--text)" }}>
-                      ⚡ n8n Automation Engine
-                    </div>
-                    <div className="form-grid-2">
-                      <div className="form-group">
-                        <label className="field-label">n8n Base URL</label>
-                        <input
-                          type="text"
-                          className="field-input"
-                          placeholder="e.g. http://localhost:5678 or https://n8n.yourdomain.com"
-                          value={formData.n8n_base_url}
-                          onChange={(e) => handleChange("n8n_base_url", e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="field-label">n8n API Key</label>
-                        {meta.n8n_has_key && !editSecrets.n8n_api_key ? (
-                          <div className="secret-saved-row">
-                            <span className="secret-indicator">🔒 Key configured in database (Masked)</span>
-                            <button
-                              type="button"
-                              className="btn-text-action"
-                              onClick={() => setEditSecrets((prev) => ({ ...prev, n8n_api_key: true }))}
-                            >
-                              Change Key
-                            </button>
-                          </div>
-                        ) : (
-                          <input
-                            type="password"
-                            className="field-input"
-                            placeholder="Enter n8n API Key..."
-                            value={formData.n8n_api_key}
-                            onChange={(e) => handleChange("n8n_api_key", e.target.value)}
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: "12px" }}>
-                      <button
-                        type="button"
-                        className="action-btn"
-                        onClick={handleTestN8n}
-                        disabled={testingN8n}
-                      >
-                        {testingN8n ? "Testing n8n..." : "⚡ Test n8n Connection"}
-                      </button>
-                    </div>
-
-                    {n8nTestResult && (
-                      <div
-                        className={`validation-box ${n8nTestResult.success ? "box-success" : "box-danger"}`}
-                        style={{ marginTop: "12px" }}
-                      >
-                        {n8nTestResult.success ? (
-                          <div>
-                            <div className="box-title">✅ n8n Connected Successfully</div>
-                            <div className="box-sub">{n8nTestResult.message}</div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="box-title">❌ n8n Connection Failed</div>
-                            <div className="box-sub">{n8nTestResult.error}</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  */}
                 </div>
               )}
             </>

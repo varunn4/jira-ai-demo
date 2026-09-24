@@ -94,7 +94,7 @@ app.include_router(rca.router)
 app.include_router(graph.router)
 app.include_router(docs.router)
 app.include_router(analytics.router)
-app.include_router(plugins.router)
+# app.include_router(plugins.router)  # Ring Studio & Zoho Desk (Commented out)
 
 # ─── Static & Assets ─────────────────────────────────────────────────────────
 app.mount(
@@ -153,7 +153,8 @@ def spa_graph_admin() -> Response:
 _API_PATH_PREFIXES = (
     "api/", "graph-admin", "auth/", "static/", "assets/", "analyze-ticket",
     "workflow", "scan/", "repomix/", "testcases/", "jobs", "repo-tree",
-    "prompts", "chat", "health", "openapi.json", "ring-studio", "rca/", "zoho/",
+    "prompts", "chat", "health", "openapi.json", "rca/",
+    # "ring-studio", "zoho/",  # (Commented out)
 )
 
 

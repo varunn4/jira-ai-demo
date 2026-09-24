@@ -4,21 +4,32 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-
     container_name: jira-ai-api
     restart: unless-stopped
-
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      neo4j:
+        condition: service_started
     env_file:
       - .env
-
     environment:
       REPOSITORY_SEARCH_ROOT: /host-repos
       REPOSITORY_HOST_ROOT: ${REPOSITORY_HOST_ROOT:-/host-repos}
       EXCLUDED_REPOSITORY_NAMES: ${EXCLUDED_REPOSITORY_NAMES:-JIRA-AI}
 
-      # IMPORTANT — these point at host services
-      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/jira_ai}
+      # Internal container networking
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/jira_ai}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
+      N8N_API_KEY: ${N8N_API_KEY:-}
+
       OLLAMA_EMBED_TIMEOUT_SECONDS: 60
       OLLAMA_EMBED_BATCH_SIZE: 8
       OLLAMA_NUM_PARALLEL: 4
@@ -26,7 +37,7 @@ services:
       CODEBASE_EMBED_MAX_CHARS: 2000
       CODEBASE_EMBED_MAX_FILES_PER_REPO: 1000
       RCA_INDEX_EXCLUDED_REPOS: ${RCA_INDEX_EXCLUDED_REPOS:-}
-      QDRANT_URL: ${QDRANT_URL:-http://host.docker.internal:6333}
+
       REPO_TREE_SRC_PATH: /app
       REPO_TREE_CONFIG_PATH: /app/repo_tree/config/repos.yaml
       REPO_TREE_WORKSPACE_DIR: /app/repo_tree/workspace
@@ -35,27 +46,25 @@ services:
       GRAPH_JOB_REPO_TIMEOUT_SECONDS: 3600
       GRAPH_JOB_REPO_CONCURRENCY: 8
 
-      # Use the mounted host SSH key for git pull over SSH (git@github.com).
+      # Use the mounted host SSH key for git pull over SSH (git@github.com)
       GIT_SSH_COMMAND: "ssh -o HostName=ssh.github.com -o Port=443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
     ports:
       - "8000:8000"
-
     volumes:
+      - ./app:/app/app:rw
+      - ./api.py:/app/api.py:ro
+      - ./frontend/dist:/app/frontend/dist:ro
       - ./workspace/repos:/app/workspace/repos:rw
       - ${HOST_REPO_DIR:-.}:/host-repos:rw
       - ./repo_tree/workspace:/app/repo_tree/workspace:rw
       - ./ring_images:/app/app/static/rings/generated:rw
       - ${HOST_SSH_DIR:-~/.ssh}:/root/.ssh:ro
-
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   postgres:
     image: postgres:16-alpine
     container_name: jira-ai-postgres
-    profiles:
-      - local-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: jira_ai
@@ -71,5 +80,51 @@ services:
       timeout: 5s
       retries: 5
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: jira-ai-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - jira_ai_qdrant_data:/qdrant/storage
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: jira-ai-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+    volumes:
+      - jira_ai_neo4j_data:/data
+      - jira_ai_neo4j_logs:/logs
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: jira-ai-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: UTC
+    volumes:
+      - jira_ai_n8n_data:/home/node/.n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   jira_ai_postgres_data:
+  jira_ai_qdrant_data:
+  jira_ai_neo4j_data:
+  jira_ai_neo4j_logs:
+  jira_ai_n8n_data:

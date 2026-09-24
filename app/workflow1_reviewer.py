@@ -136,6 +136,21 @@ class Workflow1Reviewer:
             LOGGER.exception("workflow1 step failed: save_to_db")
             raise
 
+        # Auto-transition in Jira Cloud if satisfied and Jira is configured
+        if model_output["nature"] == "satisfied":
+            try:
+                from app.jira_client import JiraClient
+                jc = JiraClient(self.settings)
+                if jc.is_configured():
+                    jc.add_comment(
+                        request.issueKey,
+                        f"🤖 *AI Governor Validation*: **APPROVED**\n\n{model_output['llm_review']}",
+                    )
+                    trans_res = jc.transition_to_approved(request.issueKey)
+                    LOGGER.info("workflow1 auto-transition for %s: %s", request.issueKey, trans_res)
+            except Exception as exc:
+                LOGGER.warning("workflow1 auto-transition skipped/failed for %s: %s", request.issueKey, exc)
+
         response = {
             "assignee_channel_id": assignee_match.channel_id,
             "reporter_channel_id": reporter_match.channel_id,

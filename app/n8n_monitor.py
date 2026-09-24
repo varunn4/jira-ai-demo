@@ -47,20 +47,35 @@ class N8nMonitor:
     def _headers(self) -> dict[str, str]:
         return {"X-N8N-API-KEY": self.api_key, "accept": "application/json"}
 
+    def _candidate_urls(self, path: str) -> list[str]:
+        clean_path = path.lstrip("/")
+        base = (self.base_url or "http://localhost:5678").rstrip("/")
+        candidates = [f"{base}/api/v1/{clean_path}"]
+        if "n8n:" in base:
+            candidates.append(f"http://localhost:5678/api/v1/{clean_path}")
+            candidates.append(f"http://127.0.0.1:5678/api/v1/{clean_path}")
+        elif "localhost" in base or "127.0.0.1" in base:
+            candidates.append(f"http://n8n:5678/api/v1/{clean_path}")
+            candidates.append(f"http://jira-ai-n8n:5678/api/v1/{clean_path}")
+            candidates.append(f"http://host.docker.internal:5678/api/v1/{clean_path}")
+        return candidates
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/api/v1/{path.lstrip('/')}"
-        try:
-            resp = requests.get(url, headers=self._headers(), params=params, timeout=self.timeout)
-        except requests.RequestException as exc:
-            raise N8nMonitorError(f"Could not reach n8n at {self.base_url}: {exc}") from exc
-        if resp.status_code == 401:
-            raise N8nMonitorError("n8n rejected the API key (401). Check N8N_API_KEY.")
-        if not resp.ok:
-            raise N8nMonitorError(f"n8n API error {resp.status_code} for {path}: {resp.text[:200]}")
-        try:
-            return resp.json()
-        except ValueError as exc:
-            raise N8nMonitorError(f"n8n returned a non-JSON response for {path}") from exc
+        last_exc: Exception | None = None
+        for url in self._candidate_urls(path):
+            try:
+                resp = requests.get(url, headers=self._headers(), params=params, timeout=self.timeout)
+                if resp.status_code == 401:
+                    raise N8nMonitorError("n8n rejected the API key (401). Check N8N_API_KEY.")
+                if not resp.ok:
+                    raise N8nMonitorError(f"n8n API error {resp.status_code} for {path}: {resp.text[:200]}")
+                return resp.json()
+            except N8nMonitorError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                continue
+        raise N8nMonitorError(f"Could not reach n8n at {self.base_url}: {last_exc}") from last_exc
 
     def _paginate(self, path: str, params: dict[str, Any], cap: int) -> list[dict[str, Any]]:
         """Page through a list endpoint until ``cap`` items or no more pages."""

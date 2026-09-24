@@ -82,3 +82,16 @@ repo_tree/workspace/repomix_state.json
 # ── Generated Ring Images & Auxiliary Assets ──────────────────────────────────
 ring_images/
 app/static/rings/generated/
+
+# ── Local Test & Verification Scripts ─────────────────────────────────────────
+scripts/generate_live_testcases.py
+scripts/import_n8n_workflows.py
+scripts/process_thread_reply.py
+scripts/run_live_approval.py
+scripts/run_live_due_date_alert.py
+scripts/run_live_review.py
+scripts/setup_demo_environment.py
+scripts/test_slack_message.py
+scripts/update_and_approve_scrum6.py
+test_*.py
+scratch/
