@@ -57,27 +57,40 @@ class RepoAccessError(RuntimeError):
     """Raised when a repo/path is invalid or a git command fails fatally."""
 
 
-def _root(settings: Settings) -> Path:
-    return Path(settings.rca_repo_root).expanduser().resolve()
+def _candidate_roots(settings: Settings) -> list[Path]:
+    from app.repository_discovery import get_workspace_repos_dir
+    roots = [get_workspace_repos_dir()]
+    if settings.rca_repo_root:
+        roots.append(Path(settings.rca_repo_root).expanduser().resolve())
+    if settings.repository_search_root:
+        roots.append(Path(settings.repository_search_root).expanduser().resolve())
+    # Deduplicate while preserving order
+    seen = set()
+    unique_roots = []
+    for r in roots:
+        try:
+            resolved = r.resolve()
+            if resolved not in seen and resolved.exists():
+                seen.add(resolved)
+                unique_roots.append(resolved)
+        except Exception:
+            pass
+    return unique_roots
 
 
 def repo_path(settings: Settings, repo: str) -> Path:
-    """Resolve a repo name to its on-disk path, refusing traversal.
-
-    The repo name must be a single path segment that resolves to a directory
-    directly under the repo root. Anything else (``..``, absolute paths,
-    nested slashes) is rejected.
-    """
+    """Resolve a repo name to its on-disk path, refusing traversal."""
     if not repo or "/" in repo or "\\" in repo or repo in (".", ".."):
         raise RepoAccessError(f"Invalid repo name: {repo!r}")
 
-    root = _root(settings)
-    candidate = (root / repo).resolve()
-    if candidate.parent != root:
-        raise RepoAccessError(f"Repo path escapes root: {repo!r}")
-    if not candidate.is_dir():
-        raise RepoAccessError(f"Repo not found under {root}: {repo!r}")
-    return candidate
+    for root in _candidate_roots(settings):
+        candidate = (root / repo).resolve()
+        try:
+            if candidate.parent.resolve() == root and candidate.is_dir():
+                return candidate
+        except Exception:
+            continue
+    raise RepoAccessError(f"Repo {repo!r} not found in workspace repositories")
 
 
 def resolve_in_repo(settings: Settings, repo: str, relpath: str) -> Path:
@@ -92,25 +105,26 @@ def resolve_in_repo(settings: Settings, repo: str, relpath: str) -> Path:
 
 
 def list_repos(settings: Settings) -> list[str]:
-    """List git repositories available under the repo root."""
-    root = _root(settings)
-    if not root.is_dir():
-        log.warning("RCA repo root does not exist: %s", root)
-        return []
+    """List git repositories available under all workspace roots."""
+    from app.repository_discovery import discover_graph_repositories
+    discovered = discover_graph_repositories(settings)
+    if discovered:
+        return [r["name"] for r in discovered if r.get("name")]
+
     repos: list[str] = []
-    try:
-        children = sorted(root.iterdir())
-    except OSError as exc:
-        log.warning("Cannot list RCA repo root %s: %s", root, exc)
-        return []
-    for child in children:
-        if child.name.startswith("."):
+    seen = set()
+    for root in _candidate_roots(settings):
+        if not root.is_dir():
             continue
         try:
-            if child.is_dir() and (child / ".git").exists():
-                repos.append(child.name)
+            for child in sorted(root.iterdir()):
+                if child.name.startswith(".") or child.name in seen:
+                    continue
+                if child.is_dir() and (child / ".git").exists():
+                    repos.append(child.name)
+                    seen.add(child.name)
         except OSError:
-            continue  # unreadable entry (e.g. restricted system dir) — skip
+            continue
     return repos
 
 

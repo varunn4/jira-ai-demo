@@ -85,24 +85,40 @@ def discover_graph_repositories(
             from app.app_settings import get_all_settings
             db_cfg = get_all_settings(settings)
             raw_urls = db_cfg.get("github_repo_urls", "")
+            org_user = db_cfg.get("github_org_or_user", db_cfg.get("github_org", ""))
             token = db_cfg.get("github_token", getattr(settings, "github_token", ""))
+            
+            discovered_targets = []
             if raw_urls:
                 for candidate in re.split(r"[\n,]+", raw_urls):
                     candidate = candidate.strip()
                     if candidate:
                         meta = fetch_single_github_repo(candidate, token=token)
                         if meta.get("clone_url") and meta.get("name"):
-                            clone_or_sync_repo(
-                                clone_url=meta["clone_url"],
-                                target_name=meta["name"],
-                                token=token,
-                                branch=meta.get("default_branch", "main"),
-                            )
-                # Re-scan primary dir after auto-restore
-                if primary_dir.exists():
-                    for child in sorted(primary_dir.iterdir()):
-                        if child.is_dir():
-                            _add_if_git(child, child)
+                            discovered_targets.append(meta)
+            elif org_user:
+                slug = parse_github_repo_slug(org_user)
+                if slug and ("github.com" in org_user or "/" in org_user.strip("/")):
+                    meta = fetch_single_github_repo(org_user, token=token)
+                    if meta.get("clone_url") and meta.get("name"):
+                        discovered_targets.append(meta)
+                else:
+                    discovered_targets = fetch_github_org_repos(org_user, token=token)
+
+            for meta in discovered_targets:
+                if meta.get("clone_url") and meta.get("name"):
+                    clone_or_sync_repo(
+                        clone_url=meta["clone_url"],
+                        target_name=meta["name"],
+                        token=token,
+                        branch=meta.get("default_branch", "main"),
+                    )
+
+            # Re-scan primary dir after auto-restore
+            if primary_dir.exists():
+                for child in sorted(primary_dir.iterdir()):
+                    if child.is_dir():
+                        _add_if_git(child, child)
         except Exception as auto_exc:
             log.debug("Auto-restore repositories from database skipped: %s", auto_exc)
 

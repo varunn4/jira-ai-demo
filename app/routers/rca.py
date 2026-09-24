@@ -35,6 +35,7 @@ def _run_rca_pipeline(run_id: str) -> None:
 def rca_start(
     jira_key: str,
     background_tasks: BackgroundTasks,
+    repo: str | None = None,
     _user: CurrentUser = Depends(require_tab("rca")),
 ) -> dict[str, Any]:
     """Kick off a root-cause analysis run for a Jira key. Returns run_id."""
@@ -48,8 +49,13 @@ def rca_start(
             user_id=getattr(_user, "id", None),
             user_email=getattr(_user, "email", None),
         )
+        if repo and repo.strip():
+            run.localized_repos = [
+                {"repo": repo.strip(), "score": 10.0, "reasons": [f"Explicitly selected: '{repo.strip()}'"]}
+            ]
+            rca_run_store._persist(run)
         background_tasks.add_task(_run_rca_pipeline, run.run_id)
-        log.info("Enqueued RCA run %s for %s by %s", run.run_id, key, getattr(_user, "email", "unknown"))
+        log.info("Enqueued RCA run %s for %s (repo=%s) by %s", run.run_id, key, repo, getattr(_user, "email", "unknown"))
         return {"run_id": run.run_id, "jira_key": key, "status": run.status}
     except Exception as exc:
         log.exception("Failed to start RCA for %s: %s", key, exc)

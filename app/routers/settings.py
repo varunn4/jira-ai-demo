@@ -217,15 +217,15 @@ def save_settings(
                 to_save[k] = v_str
 
     if to_save:
+        # Always persist to global app_settings so background jobs, container restarts, and logout keep settings
+        set_settings_bulk(settings, to_save)
         if hasattr(_user, "id") and _user.id:
             try:
                 set_user_settings_bulk(settings, _user.id, _user.email, to_save)
             except Exception as exc:
                 log.warning("Failed to save user settings for user_id=%s: %s", _user.id, exc)
-        else:
-            set_settings_bulk(settings, to_save)
         reload_settings()
-        log.info("Dynamic settings saved and reloaded for user=%s: %s", getattr(_user, "email", "global"), list(to_save.keys()))
+        log.info("Dynamic settings saved globally and for user=%s: %s", getattr(_user, "email", "global"), list(to_save.keys()))
 
     return {"status": "ok", "message": "Settings saved successfully", "saved_keys": list(to_save.keys())}
 
@@ -311,7 +311,7 @@ def validate_github_integration(
             "repos": [],
         }
 
-    # Save github settings
+    # Save github settings globally and per-user
     to_save = {
         "github_source_type": source_type,
         "github_org_or_user": org_or_user,
@@ -321,10 +321,12 @@ def validate_github_integration(
         to_save["github_token"] = token
         to_save["github_org"] = org_or_user
 
+    set_settings_bulk(settings, to_save)
     if hasattr(_user, "id") and _user.id:
-        set_user_settings_bulk(settings, _user.id, _user.email, to_save)
-    else:
-        set_settings_bulk(settings, to_save)
+        try:
+            set_user_settings_bulk(settings, _user.id, _user.email, to_save)
+        except Exception:
+            pass
     reload_settings()
 
     return {

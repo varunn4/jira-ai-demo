@@ -14,17 +14,21 @@ export default function Workflows() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState("");
 
   async function load() {
     setError("");
-    setLoading(true);
+    setRefreshing(true);
     try {
       const res = await apiFetch("/graph-admin/n8n/workflows");
       setData(res);
+      setRefreshedAt(`Updated at ${new Date().toLocaleTimeString()}`);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -50,9 +54,15 @@ export default function Workflows() {
           className="secondary"
           style={{ width: "auto", minHeight: "unset", padding: "6px 14px", fontSize: 13 }}
           onClick={load}
+          disabled={refreshing}
         >
-          Refresh
+          {refreshing ? "Refreshing…" : "Refresh"}
         </button>
+        {refreshedAt && (
+          <span style={{ fontSize: 12, color: "var(--ok, #10b981)", fontWeight: 500 }}>
+            {refreshedAt}
+          </span>
+        )}
       </div>
 
       {data && !data.configured && (
@@ -63,7 +73,7 @@ export default function Workflows() {
       )}
 
       {data?.configured && (
-        <>
+        <div style={{ opacity: refreshing ? 0.35 : 1, transition: "opacity 0.25s ease" }}>
           <div className="stats-grid">
             <Stat value={totals.workflows ?? 0} label="Workflows" />
             <Stat value={totals.active ?? 0} label="Active / Live" />
@@ -122,7 +132,7 @@ export default function Workflows() {
               )}
             </tbody>
           </table>
-        </>
+        </div>
       )}
 
       {loading && !data && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 8 }}>Loading…</div>}

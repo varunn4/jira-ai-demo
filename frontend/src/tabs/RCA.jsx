@@ -18,6 +18,8 @@ const STATUS_LABEL = {
 
 export default function RCA() {
   const [ticketId, setTicketId] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState("");
+  const [repoList, setRepoList] = useState([]);
   const [run, setRun] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,7 +32,12 @@ export default function RCA() {
     }
   };
 
-  useEffect(() => stopPolling, []);
+  useEffect(() => {
+    apiFetch("/graph-admin/neo4j/active-repositories")
+      .then((data) => setRepoList(data.repositories || []))
+      .catch(() => {});
+    return stopPolling;
+  }, []);
 
   const poll = useCallback((runId) => {
     stopPolling();
@@ -60,7 +67,8 @@ export default function RCA() {
     setBusy(true);
     setRun(null);
     try {
-      const res = await apiFetch(`/rca/${key}`, { method: "POST" });
+      const query = selectedRepo ? `?repo=${encodeURIComponent(selectedRepo)}` : "";
+      const res = await apiFetch(`/rca/${key}${query}`, { method: "POST" });
       setRun({ run_id: res.run_id, jira_key: key, status: res.status });
       poll(res.run_id);
     } catch (e) {
@@ -94,15 +102,66 @@ export default function RCA() {
         It does not generate or apply fixes.
       </p>
 
-      <div className="rca-controls" style={{ display: "flex", gap: 8, margin: "12px 0" }}>
+      {/* ── Step-by-Step RCA Workflow Guide ── */}
+      <div
+        style={{
+          background: "var(--card, #ffffff)",
+          border: "1px solid var(--line, #e2e8f0)",
+          borderRadius: "8px",
+          padding: "14px 16px",
+          margin: "12px 0 16px",
+          fontSize: "13px",
+        }}
+      >
+        <div style={{ fontWeight: 600, color: "var(--text, #1e293b)", marginBottom: "8px" }}>
+          How to run an RCA Investigation:
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+          <div style={{ padding: "10px", background: "rgba(37,99,235,0.04)", borderRadius: "6px", border: "1px solid rgba(37,99,235,0.1)" }}>
+            <strong style={{ color: "var(--primary, #2563eb)" }}>Step 1: Build Code Index</strong>
+            <p style={{ margin: "4px 0 0", color: "var(--text-muted, #64748b)", fontSize: "12px", lineHeight: 1.4 }}>
+              Click <strong>Build now</strong> below to index repository functions into vector chunks so the AI agent can discover relevant code.
+            </p>
+          </div>
+          <div style={{ padding: "10px", background: "rgba(37,99,235,0.04)", borderRadius: "6px", border: "1px solid rgba(37,99,235,0.1)" }}>
+            <strong style={{ color: "var(--primary, #2563eb)" }}>Step 2: Select Defect &amp; Target Repo</strong>
+            <p style={{ margin: "4px 0 0", color: "var(--text-muted, #64748b)", fontSize: "12px", lineHeight: 1.4 }}>
+              Enter the Jira Ticket ID (e.g. <code>SCRUM-9</code>) and select a repository (or keep auto-detect).
+            </p>
+          </div>
+          <div style={{ padding: "10px", background: "rgba(37,99,235,0.04)", borderRadius: "6px", border: "1px solid rgba(37,99,235,0.1)" }}>
+            <strong style={{ color: "var(--primary, #2563eb)" }}>Step 3: Run RCA &amp; Export</strong>
+            <p style={{ margin: "4px 0 0", color: "var(--text-muted, #64748b)", fontSize: "12px", lineHeight: 1.4 }}>
+              Click <strong>Run RCA</strong> to generate the root-cause diagnosis, inspect the agent trace, and download the official <strong>.docx</strong> report.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <CodeIndexPanel />
+
+      <div className="rca-controls" style={{ display: "flex", gap: 10, margin: "14px 0", flexWrap: "wrap", alignItems: "center" }}>
         <input
           value={ticketId}
           onChange={(e) => setTicketId(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !busy && start()}
-          placeholder="Ticket ID (e.g. OPS-428)"
+          placeholder="Ticket ID (e.g. SCRUM-9)"
           disabled={busy}
-          style={{ flex: "0 0 240px" }}
+          style={{ flex: "0 0 220px" }}
         />
+        <select
+          value={selectedRepo}
+          onChange={(e) => setSelectedRepo(e.target.value)}
+          disabled={busy}
+          style={{ flex: "0 0 240px", padding: "8px 12px", fontSize: "13px" }}
+        >
+          <option value="">All active repositories (auto-detect)</option>
+          {repoList.map((r) => (
+            <option key={r.name} value={r.name}>
+              {r.name}
+            </option>
+          ))}
+        </select>
         <button onClick={start} disabled={busy}>
           {busy ? "Running…" : "Run RCA"}
         </button>
