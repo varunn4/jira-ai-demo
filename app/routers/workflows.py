@@ -6,7 +6,7 @@ import logging
 from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from app.config import settings
+from app.config import reload_settings, settings
 from app.dev_pr_gate import pr_context, pr_gate
 from app.doc_review import DocReviewer
 from app.exceptions import PromptNotFoundError
@@ -347,20 +347,22 @@ def slack_chat_message(request: SlackMessageRequest) -> SlackMessageResponse:
 
 def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None) -> None:
     """Asynchronous background worker for handling incoming Slack events."""
+    reload_settings()
     text = str(event.get("text") or "").strip()
     channel_id = str(event.get("channel") or "")
     user_id = str(event.get("user") or "")
-    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+    thread_ts = str(event.get("thread_ts") or "")  # only set if message is already inside a thread
 
     if not channel_id or not text or not user_id:
         return
 
     log.info(
-        "Processing Slack event: user=%s channel=%s thread_ts=%s text=%r",
+        "Processing Slack event: user=%s channel=%s thread_ts=%s text=%r (bot_configured=%s)",
         user_id,
         channel_id,
-        thread_ts,
+        thread_ts or "None (top-level)",
         text[:80],
+        bool(settings.slack_bot_token),
     )
 
     slack_client = SlackClient(settings)
@@ -390,6 +392,9 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
     if ticket_found:
         return
 
+    # Determine reply target: if already in thread, reply in thread; for app_mentions, start thread under the mention; otherwise post to channel/thread
+    target_thread = thread_ts or (event.get("ts") if event.get("type") == "app_mention" else None)
+
     # 2. Check if message references a Jira issue key like PROJ-123
     import re
     jira_keys = re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", text)
@@ -418,7 +423,7 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
                     user_message=prompt,
                     max_tokens=250,
                 ).strip()
-                slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=thread_ts)
+                slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
                 return
         except Exception as exc:
             log.warning("Failed processing Jira key lookup: %s", exc)
@@ -434,7 +439,7 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
             user_message=text,
             max_tokens=150,
         ).strip()
-        slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=thread_ts)
+        slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
     except Exception as exc:
         log.exception("Failed to send conversational Slack reply: %s", exc)
 
