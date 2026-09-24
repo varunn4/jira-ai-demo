@@ -20,6 +20,7 @@ from app.repository_discovery import (
     fetch_github_org_repos,
     fetch_single_github_repo,
     get_workspace_repos_dir,
+    parse_github_repo_slug,
 )
 
 log = logging.getLogger(__name__)
