@@ -21,12 +21,10 @@ log = logging.getLogger(__name__)
 
 def get_workspace_repos_dir(user_id: Optional[int] = None) -> Path:
     """Return the managed workspace directory for cloned/synced repositories.
-    If user_id is provided, returns a user-isolated repository workspace.
+    All repositories in a deployment are maintained in the unified workspace directory
+    so background jobs, Neo4j, and all team members share the codebase.
     """
-    if user_id:
-        base = (Path("/app/workspace/users") if Path("/app").exists() else Path("./workspace/users")) / str(user_id) / "repos"
-    else:
-        base = Path("/app/workspace/repos") if Path("/app").exists() else Path("./workspace/repos")
+    base = Path("/app/workspace/repos") if Path("/app").exists() else Path("./workspace/repos")
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -36,17 +34,13 @@ def discover_graph_repositories(
     only_names: set[str] | list[str] | None = None,
     user_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    """Discover all Git repositories synchronized into the managed workspace for the given user."""
-    workspace_dir = get_workspace_repos_dir(user_id=user_id)
-
+    """Discover all Git repositories synchronized into the managed workspace."""
     excluded_names = {
         name.strip().lower()
         for name in settings.excluded_repository_names.split(",")
         if name.strip()
     }
     wanted = set(only_names) if only_names else None
-
-    log.info("Discovering repositories under %s (filter: %s, user_id: %s)", workspace_dir, wanted or "all", user_id)
 
     seen_names: set[str] = set()
     repositories: list[dict[str, Any]] = []
@@ -62,25 +56,55 @@ def discover_graph_repositories(
             repositories.append(_repository_info(scan_path=scan_path, host_path=host_path))
             log.debug("Found git repository: %s at %s", name, scan_path)
 
-    # Scan workspace repositories directory (cloned from GitHub)
-    if workspace_dir.exists() and workspace_dir.is_dir():
+    # 1. Primary unified workspace directory
+    primary_dir = get_workspace_repos_dir(None)
+    if primary_dir.exists() and primary_dir.is_dir():
         try:
-            for child in sorted(workspace_dir.iterdir()):
+            for child in sorted(primary_dir.iterdir()):
                 if child.is_dir():
                     _add_if_git(child, child)
         except Exception as exc:
-            log.warning("Error scanning workspace repos %s: %s", workspace_dir, exc)
+            log.warning("Error scanning primary workspace repos %s: %s", primary_dir, exc)
 
-    # If user-specific dir is empty and user_id is None, also check legacy global dir
-    if not repositories and user_id is None:
-        global_dir = get_workspace_repos_dir(None)
-        if global_dir.exists() and global_dir != workspace_dir:
-            try:
-                for child in sorted(global_dir.iterdir()):
-                    if child.is_dir():
-                        _add_if_git(child, child)
-            except Exception as exc:
-                log.warning("Error scanning fallback global repos %s: %s", global_dir, exc)
+    # 2. Check all user-isolated directories if any were created
+    users_base = (Path("/app/workspace/users") if Path("/app").exists() else Path("./workspace/users"))
+    if users_base.exists() and users_base.is_dir():
+        try:
+            for u_dir in sorted(users_base.iterdir()):
+                u_repos = u_dir / "repos"
+                if u_repos.exists() and u_repos.is_dir():
+                    for child in sorted(u_repos.iterdir()):
+                        if child.is_dir():
+                            _add_if_git(child, child)
+        except Exception as exc:
+            log.warning("Error scanning user workspaces %s: %s", users_base, exc)
+
+    # 3. Auto-restore from PostgreSQL settings if empty on ephemeral cloud disk
+    if not repositories:
+        try:
+            from app.app_settings import get_all_settings
+            db_cfg = get_all_settings(settings)
+            raw_urls = db_cfg.get("github_repo_urls", "")
+            token = db_cfg.get("github_token", getattr(settings, "github_token", ""))
+            if raw_urls:
+                for candidate in re.split(r"[\n,]+", raw_urls):
+                    candidate = candidate.strip()
+                    if candidate:
+                        meta = fetch_single_github_repo(candidate, token=token)
+                        if meta.get("clone_url") and meta.get("name"):
+                            clone_or_sync_repo(
+                                clone_url=meta["clone_url"],
+                                target_name=meta["name"],
+                                token=token,
+                                branch=meta.get("default_branch", "main"),
+                            )
+                # Re-scan primary dir after auto-restore
+                if primary_dir.exists():
+                    for child in sorted(primary_dir.iterdir()):
+                        if child.is_dir():
+                            _add_if_git(child, child)
+        except Exception as auto_exc:
+            log.debug("Auto-restore repositories from database skipped: %s", auto_exc)
 
     repositories.sort(key=lambda repo: repo["name"].lower())
     log.info("Discovered %d repositories in workspace", len(repositories))

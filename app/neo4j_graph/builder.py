@@ -99,7 +99,13 @@ def select_active_repositories(
     selected_names: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     repos = discover_graph_repositories(settings)
-    active = [r for r in repos if (r.get("activity_score") or 0) >= cfg.activity_min_score]
+    if cfg.activity_min_score > 0:
+        active = [r for r in repos if (r.get("activity_score") or 0) >= cfg.activity_min_score]
+        # If activity score filter leaves 0 repos, fall back to all discovered repos
+        if not active and repos:
+            active = repos
+    else:
+        active = repos
     if selected_names:
         wanted = {n for n in selected_names}
         active = [r for r in active if r.get("name") in wanted]

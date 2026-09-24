@@ -79,10 +79,14 @@ def graph_admin_jira_tickets(
     offset: int = 0,
     project_key: str | None = None,
     q: str | None = None,
+    force_refresh: bool = False,
     _user: CurrentUser = Depends(require_tab("jira")),
 ) -> dict[str, Any]:
-    log.debug("GET /graph-admin/jira-tickets project=%s q=%s limit=%d offset=%d", project_key, q, limit, offset)
-    if not settings.database_url:
+    log.debug("GET /graph-admin/jira-tickets project=%s q=%s limit=%d offset=%d force_refresh=%s", project_key, q, limit, offset, force_refresh)
+    from app.config import reload_settings
+    current_settings = reload_settings()
+
+    if not current_settings.database_url:
         return {
             "count": 0,
             "tickets": [],
@@ -94,12 +98,26 @@ def graph_admin_jira_tickets(
         from psycopg.rows import dict_row
 
         where, base_params = _jira_project_where_clause(project_key=project_key, q=q)
-        with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+        with psycopg.connect(current_settings.database_url, row_factory=dict_row) as conn:
             row = conn.execute(
                 f"SELECT COUNT(*) AS n FROM jira_ticket_cache {where}",
                 base_params,
             ).fetchone()
             count = row["n"] if row else 0
+
+            # Auto-fetch if cache is empty or user requested force_refresh
+            if (count == 0 or force_refresh) and current_settings.jira_base_url and current_settings.jira_email and current_settings.jira_api_token:
+                try:
+                    from app.jira_fetcher import fetch_all_tickets
+                    log.info("Jira cache empty or force_refresh requested in graph_admin_jira_tickets; syncing from Jira Cloud...")
+                    fetch_all_tickets(force_refresh=True)
+                    row = conn.execute(
+                        f"SELECT COUNT(*) AS n FROM jira_ticket_cache {where}",
+                        base_params,
+                    ).fetchone()
+                    count = row["n"] if row else 0
+                except Exception as sync_exc:
+                    log.warning("Failed auto-syncing Jira tickets: %s", sync_exc)
 
             list_params = (*base_params, limit, offset)
             tickets = conn.execute(
@@ -163,24 +181,47 @@ def graph_admin_fetch_logs(
 def graph_admin_jira_ticket_insights(
     project_key: str | None = None,
     match_type: str = "all",
-    limit: int = 200,
+    limit: int = 500,
+    force_refresh: bool = False,
     _user: CurrentUser = Depends(require_tab("insights")),
 ) -> dict[str, Any]:
     log.debug(
-        "GET /graph-admin/jira-ticket-insights project=%s match_type=%s limit=%d",
+        "GET /graph-admin/jira-ticket-insights project=%s match_type=%s limit=%d force_refresh=%s",
         project_key,
         match_type,
         limit,
+        force_refresh,
     )
+    from app.config import reload_settings
+    current_settings = reload_settings()
+
     try:
         clean_project_key = project_key.strip().upper() if project_key else None
-        return scan_jira_ticket_cache(
-            settings,
+        res = scan_jira_ticket_cache(
+            current_settings,
             project_key=clean_project_key or None,
             match_type=match_type,
             limit=max(1, min(limit, 1000)),
             excluded_project_keys=_excluded_jira_projects(),
         )
+
+        # If cache is empty or user requested force_refresh, fetch tickets from Jira Cloud
+        if (res.get("total_tickets", 0) == 0 or force_refresh) and current_settings.jira_base_url and current_settings.jira_email and current_settings.jira_api_token:
+            try:
+                from app.jira_fetcher import fetch_all_tickets
+                log.info("Jira cache empty or refresh requested: fetching live tickets from Jira Cloud...")
+                fetch_all_tickets(force_refresh=True)
+                res = scan_jira_ticket_cache(
+                    current_settings,
+                    project_key=clean_project_key or None,
+                    match_type=match_type,
+                    limit=max(1, min(limit, 1000)),
+                    excluded_project_keys=_excluded_jira_projects(),
+                )
+            except Exception as exc:
+                log.warning("Live Jira fetch encountered error: %s", exc)
+
+        return res
     except Exception as exc:
         log.error("Failed to scan jira_ticket_cache: %s", exc)
         return {
