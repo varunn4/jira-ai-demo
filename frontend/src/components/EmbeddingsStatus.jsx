@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../api";
 import { fmtDate, fmtDuration, fmtRelative, pct } from "../lib/format";
+import { CaretDown, CaretRight } from "@phosphor-icons/react";
 
 // Maps a per-collection health string to a status dot class + label.
 const HEALTH = {
@@ -90,7 +91,7 @@ export default function EmbeddingsStatus({ refreshKey = 0 }) {
         ) : data ? (
           <span className="embed-total">{totalPoints.toLocaleString()} vectors</span>
         ) : null}
-        <span className="embed-chevron">{open ? "▾" : "▸"}</span>
+        <span className="embed-chevron">{open ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}</span>
       </button>
 
       {open && (

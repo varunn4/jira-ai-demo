@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { apiFetch, apiDownload } from "../api";
 import { fmtDate } from "../lib/format";
+import {
+  ArrowsClockwise,
+  FileXls,
+  SpinnerGap,
+  Check,
+  CaretUp,
+  CaretDown,
+  MagnifyingGlass,
+} from "@phosphor-icons/react";
 
 const MATCH_TYPES = [
   { value: "all", label: "All matches" },
@@ -188,7 +197,8 @@ export default function Insights() {
               margin: 0,
             }}
           >
-            🔄 Refresh
+            <ArrowsClockwise size={15} weight="bold" />
+            Refresh
           </button>
 
           <select
@@ -233,7 +243,7 @@ export default function Insights() {
               border: "1px solid var(--line-strong, #cbd5e1)",
             }}
           >
-            <span>📊</span>
+            {downloading ? <SpinnerGap size={15} className="animate-spin" /> : <FileXls size={15} weight="bold" />}
             <span>{downloading ? "Exporting..." : "Excel Report"}</span>
           </button>
         </div>
@@ -359,8 +369,9 @@ function InsightRow({ t }) {
       {/* Test Cases Found */}
       <td style={{ padding: "12px 10px", textAlign: "center" }}>
         {t.has_test_cases ? (
-          <span className="badge ok" style={{ fontSize: 11, padding: "2px 8px" }}>
-            ✓ Found
+          <span className="badge ok" style={{ fontSize: 11, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <Check size={12} weight="bold" />
+            Found
           </span>
         ) : (
           <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
@@ -421,8 +432,9 @@ function InsightRow({ t }) {
                 transform: "none",
               }}
             >
-              <span>{open ? "▲" : "▼"}</span>
-              <span>🔍 {matches.length} hit{matches.length !== 1 ? "s" : ""}</span>
+              {open ? <CaretUp size={12} weight="bold" /> : <CaretDown size={12} weight="bold" />}
+              <MagnifyingGlass size={13} weight="bold" />
+              <span>{matches.length} hit{matches.length !== 1 ? "s" : ""}</span>
             </button>
 
             {open && (

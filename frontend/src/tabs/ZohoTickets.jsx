@@ -4,6 +4,23 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api.js";
 import { fmtDate } from "../lib/format.js";
+import { Button } from "../components/ui/button.jsx";
+import {
+  Ticket,
+  CheckCircle2,
+  AlertCircle,
+  Settings,
+  X,
+  XCircle,
+  ExternalLink,
+  Lock,
+  Zap,
+  Save,
+  Paperclip,
+  HelpCircle,
+  Search,
+  KeyRound,
+} from "lucide-react";
 
 // Zoho status → badge class. Anything unmapped falls back to a neutral pill.
 function statusClass(status) {
@@ -72,15 +89,18 @@ export default function ZohoTickets() {
       <header className="zoho-hero" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-            <h2 style={{ margin: 0 }}>🎫 Zoho Tickets</h2>
+            <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+              <Ticket size={22} color="var(--primary)" />
+              Zoho Tickets
+            </h2>
             {configured === true && (
-              <span className="badge ok" style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px" }}>
-                ✓ Connected
+              <span className="badge ok" style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <CheckCircle2 size={12} /> Connected
               </span>
             )}
             {configured === false && (
-              <span className="badge warn" style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px" }}>
-                ⚠️ Not Configured
+              <span className="badge warn" style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <AlertCircle size={12} /> Not Configured
               </span>
             )}
           </div>
@@ -89,14 +109,16 @@ export default function ZohoTickets() {
           </p>
         </div>
 
-        <button
+        <Button
           type="button"
-          className="action-btn"
+          variant="outline"
+          size="sm"
+          icon={Settings}
+          iconSize={14}
           onClick={() => setShowConfigModal(true)}
-          style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 600, padding: "7px 14px" }}
         >
-          ⚙️ Configure Credentials
-        </button>
+          Configure Credentials
+        </Button>
       </header>
 
       {configured === false && (
@@ -104,14 +126,16 @@ export default function ZohoTickets() {
           <div>
             <strong>Zoho Desk is not configured:</strong> Please configure your Zoho OAuth Client ID, Secret, Refresh Token, and Org ID.
           </div>
-          <button
+          <Button
             type="button"
-            className="btn-primary"
-            style={{ fontSize: "12px", padding: "4px 12px", minHeight: "30px" }}
+            variant="default"
+            size="sm"
+            icon={Settings}
+            iconSize={14}
             onClick={() => setShowConfigModal(true)}
           >
-            ⚙️ Configure Now
-          </button>
+            Configure Now
+          </Button>
         </div>
       )}
 
@@ -139,9 +163,17 @@ export default function ZohoTickets() {
               autoComplete="off"
             />
           </label>
-          <button type="submit" disabled={loading}>
-            {loading ? "Fetching…" : "Fetch Tickets"}
-          </button>
+          <Button
+            type="submit"
+            variant="primary"
+            loading={loading}
+            loadingText="Fetching…"
+            icon={Search}
+            iconSize={14}
+            disabled={loading}
+          >
+            Fetch Tickets
+          </Button>
         </div>
       </form>
 
@@ -362,13 +394,16 @@ function ZohoConfigModal({ onClose, onSaved }) {
       <div className="modal-container" style={{ maxWidth: "680px" }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <h2 className="modal-title">⚙️ Configure Zoho Desk Credentials</h2>
+            <h2 className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Settings size={18} />
+              Configure Zoho Desk Credentials
+            </h2>
             <p className="modal-subtitle">
               Manage OAuth 2.0 credentials to search customer tickets and conversation histories.
             </p>
           </div>
-          <button className="modal-close-btn" onClick={onClose}>
-            ✕
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close">
+            <X size={16} />
           </button>
         </div>
 
@@ -379,32 +414,44 @@ function ZohoConfigModal({ onClose, onSaved }) {
             </div>
           ) : (
             <>
-              {saveSuccess && <div className="callout callout-success">✅ {saveSuccess}</div>}
-              {saveError && <div className="callout callout-danger">❌ {saveError}</div>}
+              {saveSuccess && (
+                <div className="callout callout-success" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <CheckCircle2 size={15} /> {saveSuccess}
+                </div>
+              )}
+              {saveError && (
+                <div className="callout callout-danger" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <XCircle size={15} /> {saveError}
+                </div>
+              )}
 
               {/* Guide Banner */}
               <div className="callout callout-info" style={{ marginBottom: "14px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span><strong>🎟️ Zoho OAuth Setup:</strong> Requires Self Client credentials with Desk scopes.</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <KeyRound size={15} />
+                    <strong>Zoho OAuth Setup:</strong> Requires Self Client credentials with Desk scopes.
+                  </span>
                   <button
                     type="button"
                     className="btn-text-action"
                     onClick={() => setShowHelp(!showHelp)}
-                    style={{ fontSize: "12px", color: "var(--accent-strong)", fontWeight: 650 }}
+                    style={{ fontSize: "12px", color: "var(--accent-strong)", fontWeight: 650, display: "inline-flex", alignItems: "center", gap: "4px" }}
                   >
-                    {showHelp ? "Hide Guide ▲" : "View Guide 📖"}
+                    <HelpCircle size={13} />
+                    {showHelp ? "Hide Guide" : "View Guide"}
                   </button>
                 </div>
                 {showHelp && (
                   <div style={{ marginTop: "10px", fontSize: "12px", lineHeight: 1.5, borderTop: "1px dashed var(--line)", paddingTop: "8px" }}>
                     <p style={{ margin: "0 0 6px" }}>
                       1. Open{" "}
-                      <a href="https://api-console.zoho.in" target="_blank" rel="noreferrer" className="link-highlight">
-                        Zoho API Console (India) ↗
+                      <a href="https://api-console.zoho.in" target="_blank" rel="noreferrer" className="link-highlight" style={{ display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                        Zoho API Console (India) <ExternalLink size={11} />
                       </a>{" "}
                       or{" "}
-                      <a href="https://api-console.zoho.com" target="_blank" rel="noreferrer" className="link-highlight">
-                        Global Console (.com) ↗
+                      <a href="https://api-console.zoho.com" target="_blank" rel="noreferrer" className="link-highlight" style={{ display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                        Global Console (.com) <ExternalLink size={11} />
                       </a>
                     </p>
                     <p style={{ margin: "0 0 6px" }}>
@@ -456,7 +503,9 @@ function ZohoConfigModal({ onClose, onSaved }) {
                   <label className="field-label">Zoho Client Secret</label>
                   {meta.zoho_has_client_secret && !editSecrets.zoho_client_secret ? (
                     <div className="secret-saved-row">
-                      <span className="secret-indicator">🔒 Secret configured in database</span>
+                      <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <Lock size={12} /> Secret configured in database
+                      </span>
                       <button
                         type="button"
                         className="btn-text-action"
@@ -483,7 +532,9 @@ function ZohoConfigModal({ onClose, onSaved }) {
                   <label className="field-label">Zoho Refresh Token</label>
                   {meta.zoho_has_refresh_token && !editSecrets.zoho_refresh_token ? (
                     <div className="secret-saved-row">
-                      <span className="secret-indicator">🔒 Token configured in database</span>
+                      <span className="secret-indicator" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <Lock size={12} /> Token configured in database
+                      </span>
                       <button
                         type="button"
                         className="btn-text-action"
@@ -581,8 +632,9 @@ function ZohoConfigModal({ onClose, onSaved }) {
                   className="action-btn"
                   onClick={handleTest}
                   disabled={testing}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                 >
-                  {testing ? "Testing Zoho..." : "⚡ Test Zoho Connection"}
+                  {testing ? "Testing Zoho..." : <><Zap size={14} /> Test Zoho Connection</>}
                 </button>
               </div>
 
@@ -593,12 +645,12 @@ function ZohoConfigModal({ onClose, onSaved }) {
                 >
                   {testResult.success ? (
                     <div>
-                      <div className="box-title">✅ Zoho Desk Connected Successfully</div>
+                      <div className="box-title" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CheckCircle2 size={16} color="var(--ok)" /> Zoho Desk Connected Successfully</div>
                       <div className="box-sub">{testResult.message}</div>
                     </div>
                   ) : (
                     <div>
-                      <div className="box-title">❌ Zoho Desk Connection Failed</div>
+                      <div className="box-title" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><XCircle size={16} color="var(--danger)" /> Zoho Desk Connection Failed</div>
                       <div className="box-sub">{testResult.error}</div>
                     </div>
                   )}
@@ -612,8 +664,8 @@ function ZohoConfigModal({ onClose, onSaved }) {
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "💾 Save Zoho Credentials"}
+          <button type="button" className="btn-primary" onClick={handleSave} disabled={saving} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {saving ? "Saving..." : <><Save size={14} /> Save Zoho Credentials</>}
           </button>
         </div>
       </div>
@@ -669,8 +721,8 @@ function TicketDetailModal({ ticket, onClose }) {
               {detail.department ? ` · ${detail.department}` : ""}
             </div>
           </div>
-          <button type="button" className="secondary" onClick={onClose} aria-label="Close">
-            ✕
+          <button type="button" className="secondary" onClick={onClose} aria-label="Close" style={{ display: "inline-flex", alignItems: "center" }}>
+            <X size={14} />
           </button>
         </header>
 
@@ -710,7 +762,12 @@ function TicketDetailModal({ ticket, onClose }) {
                 <span className="muted">
                   {t.direction === "out" ? "Agent reply" : "From customer"}
                   {t.channel ? ` · ${t.channel}` : ""}
-                  {t.has_attachment ? " · 📎" : ""}
+                  {t.has_attachment ? (
+                    <>
+                      {" · "}
+                      <Paperclip size={12} style={{ verticalAlign: "-2px" }} aria-label="Has attachment" />
+                    </>
+                  ) : null}
                   {` · ${fmtDate(t.created_time)}`}
                 </span>
               </div>
@@ -722,8 +779,8 @@ function TicketDetailModal({ ticket, onClose }) {
 
         {detail.web_url ? (
           <footer className="zoho-modal-foot">
-            <a href={detail.web_url} target="_blank" rel="noreferrer">
-              Open in Zoho Desk ↗
+            <a href={detail.web_url} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              Open in Zoho Desk <ExternalLink size={13} />
             </a>
           </footer>
         ) : null}

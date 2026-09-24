@@ -1,11 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
 
 // The SPA is served by FastAPI from `frontend/dist` at the site root.
 // During local development, `npm run dev` proxies API calls to uvicorn so the
 // React dev server (5173) and the FastAPI app (8000) behave like one origin.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   base: "/",
   build: {
     outDir: "dist",
@@ -28,6 +35,3 @@ export default defineConfig({
     },
   },
 });
-
-
-

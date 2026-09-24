@@ -62,6 +62,10 @@ class N8nMonitor:
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         last_exc: Exception | None = None
+        # The first candidate is the configured URL; the rest are Docker-network
+        # fallbacks whose DNS errors would otherwise mask the real failure.
+        primary_exc: Exception | None = None
+        api_err: N8nMonitorError | None = None
         for url in self._candidate_urls(path):
             try:
                 resp = requests.get(url, headers=self._headers(), params=params, timeout=self.timeout)
@@ -69,6 +73,7 @@ class N8nMonitor:
                     raise N8nMonitorError("n8n rejected the API key (401). Please verify N8N_API_KEY.")
                 if resp.status_code in (502, 503, 504):
                     last_exc = N8nMonitorError("n8n instance is currently waking up from idle on Render (502 Gateway). Please click Refresh in 15-20 seconds.")
+                    api_err = api_err or last_exc
                     continue
                 if not resp.ok:
                     clean_text = resp.text[:120] if not resp.text.startswith("<!DOCTYPE") else f"HTTP {resp.status_code}"
@@ -78,11 +83,30 @@ class N8nMonitor:
                 if "401" in str(err):
                     raise
                 last_exc = err
+                api_err = api_err or err
                 continue
             except Exception as exc:
                 last_exc = exc
+                if primary_exc is None:
+                    primary_exc = exc
                 continue
-        raise N8nMonitorError(f"Could not reach n8n at {self.base_url}: {last_exc}") from last_exc
+        # An HTTP-level error (e.g. 502 while waking up) means n8n was reached,
+        # which is more useful than any connection error from a fallback host.
+        if api_err is not None:
+            raise api_err
+        base = self.base_url or "http://localhost:5678"
+        if isinstance(primary_exc, requests.ConnectionError):
+            raise N8nMonitorError(
+                f"Could not connect to n8n at {base}. Make sure n8n is running and "
+                f"N8N_BASE_URL points to it."
+            ) from primary_exc
+        if isinstance(primary_exc, requests.Timeout):
+            raise N8nMonitorError(
+                f"n8n at {base} did not respond within {self.timeout}s."
+            ) from primary_exc
+        raise N8nMonitorError(f"Could not reach n8n at {base}: {primary_exc or last_exc}") from (
+            primary_exc or last_exc
+        )
 
     def _paginate(self, path: str, params: dict[str, Any], cap: int) -> list[dict[str, Any]]:
         """Page through a list endpoint until ``cap`` items or no more pages."""

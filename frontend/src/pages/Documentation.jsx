@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch, apiDownload, triggerBlobDownload } from "../api";
 import { renderMarkdown } from "../lib/markdown";
 import Header from "../components/Header.jsx";
+import { Warning } from "@phosphor-icons/react";
 
 const fmtTokens = (n) => Number(n || 0).toLocaleString();
 
@@ -234,7 +235,7 @@ export default function Documentation() {
                 {repos.length === 0 && <option value="">Loading repositories…</option>}
                 {repos.map((r) => (
                   <option key={r.name} value={r.name}>
-                    {r.name}{r.has_packed_source ? " ✓ (Indexed)" : ""}
+                    {r.name}{r.has_packed_source ? " (Indexed)" : ""}
                   </option>
                 ))}
               </select>
@@ -272,7 +273,12 @@ export default function Documentation() {
                 {confirm.reindex && (
                   <p className="tc-optional" style={{ marginTop: 0, marginBottom: 6, lineHeight: 1.5 }}>
                     {confirm.reindex.error
-                      ? `⚠ Could not refresh repository data (using last indexed copy): ${confirm.reindex.error}`
+                      ? (
+                        <>
+                          <Warning size={13} weight="bold" color="var(--warn, #d97706)" style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                          Could not refresh repository data (using last indexed copy): {confirm.reindex.error}
+                        </>
+                      )
                       : (confirm.reindex.packed || []).length
                       ? "Repository code changed — Repomix data refreshed (free) before estimating."
                       : "Repository unchanged since last index — using current data (refresh is free)."}

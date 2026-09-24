@@ -6,6 +6,7 @@
 // image, and batch-export prompts as JSONL for a 1000-image run.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiDownload, apiUpload } from "../api.js";
+import { Images, Diamond, DiceFive, Check, Image, DownloadSimple } from "@phosphor-icons/react";
 
 const MAX_UPLOADS = 4;
 
@@ -241,9 +242,11 @@ export default function RingStudio() {
           title="View all generated rings"
           aria-label="View all generated rings"
         >
-          🖼️
+          <Images size={20} />
         </button>
-        <h2>💎 Ring Studio</h2>
+        <h2>
+          <Diamond size={22} weight="duotone" color="var(--accent)" /> Ring Studio
+        </h2>
         <p className="muted">
           <b>Upload up to 4 photos of your ring</b>, add its details, and render it
           re-designed across all 4 views — only the prompt and your photos drive
@@ -299,7 +302,7 @@ export default function RingStudio() {
               {busy ? "Assembling…" : "Generate Prompt"}
             </button>
             <button className="secondary" onClick={surprise} disabled={busy || !banks}>
-              🎲 Surprise Me
+              <DiceFive size={15} /> Surprise Me
             </button>
             <button
               className="secondary"
@@ -378,7 +381,7 @@ export default function RingStudio() {
               <div className="ring-prompt-head">
                 <h4>Master prompt</h4>
                 <button className="link" onClick={copyPrompt}>
-                  {copied ? "Copied ✓" : "Copy"}
+                  {copied ? <>Copied <Check size={13} weight="bold" /></> : "Copy"}
                 </button>
               </div>
               <pre className="ring-prompt">{result.prompt}</pre>
@@ -473,7 +476,7 @@ export default function RingStudio() {
                   </select>
                 </label>
                 <button onClick={renderImages} disabled={rendering || !uploads.length}>
-                  {rendering ? "Rendering 4 views…" : "🖼️ Render 4 Views"}
+                  {rendering ? "Rendering 4 views…" : <><Image size={15} /> Render 4 Views</>}
                 </button>
               </div>
               <span className="ring-render-hint muted">
@@ -631,7 +634,7 @@ function ViewsGallery({ result, onDownloadZip }) {
             ) : null}
           </div>
           <button className="secondary" onClick={onDownloadZip}>
-            ⬇ Download all as ZIP
+            <DownloadSimple size={15} weight="bold" /> Download all as ZIP
           </button>
         </div>
       ) : result.model ? (
@@ -669,7 +672,7 @@ function ViewCard({ v }) {
       ) : (
         <div className="ring-view-placeholder">
           <button className="link" onClick={copy}>
-            {copied ? "Copied ✓" : "Copy prompt"}
+            {copied ? <>Copied <Check size={13} weight="bold" /></> : "Copy prompt"}
           </button>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import { fmtDate } from "../lib/format";
+import { Check } from "@phosphor-icons/react";
 
 export default function Logs() {
   const [jobs, setJobs] = useState([]);
@@ -105,7 +106,7 @@ export default function Logs() {
               <tr key={i}>
                 <td>{l.project_key}</td>
                 <td>{l.ticket_count}</td>
-                <td>{l.from_cache ? "✓" : ""}</td>
+                <td>{l.from_cache ? <Check size={14} weight="bold" color="var(--ok)" aria-label="From cache" /> : ""}</td>
                 <td>{l.duration_ms}</td>
                 <td>{fmtDate(l.fetched_at)}</td>
                 <td style={{ color: "var(--danger)", fontSize: 12 }}>{l.error || ""}</td>

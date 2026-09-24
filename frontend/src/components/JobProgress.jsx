@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CaretUp, CaretDown } from "@phosphor-icons/react";
 
 export default function JobProgress({ stats, job }) {
   const [showLogs, setShowLogs] = useState(false);
@@ -27,8 +28,10 @@ export default function JobProgress({ stats, job }) {
             type="button"
             className="toggle-logs-btn"
             onClick={() => setShowLogs((prev) => !prev)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
           >
-            {showLogs ? "Hide Logs ▲" : `View Logs (${logs.length}) ▼`}
+            {showLogs ? "Hide Logs" : `View Logs (${logs.length})`}
+            {showLogs ? <CaretUp size={12} weight="bold" /> : <CaretDown size={12} weight="bold" />}
           </button>
         )}
       </div>

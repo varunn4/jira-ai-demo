@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../api";
+import { CaretUp, CaretDown } from "@phosphor-icons/react";
 
 // Build modes map to the backend `wipe_mode`.
 const BUILD_MODES = [
@@ -207,7 +208,7 @@ export default function Neo4jGraph({ setStatus }) {
           <>
             {analytics.trends?.available && analytics.trends.baseline_at && (
               <p className="meta" style={{ marginTop: 0 }}>
-                Trend ▲/▼ shown vs the previous snapshot ({new Date(analytics.trends.baseline_at).toLocaleString()}).
+                Trend arrows show the change vs the previous snapshot ({new Date(analytics.trends.baseline_at).toLocaleString()}).
               </p>
             )}
 
@@ -313,13 +314,14 @@ export default function Neo4jGraph({ setStatus }) {
   );
 }
 
-// ▲N (up, green) / ▼N (down, red) / nothing for 0 or unknown.
+// Up caret + N (green) / down caret + N (red) / nothing for 0 or unknown.
 function Trend({ delta }) {
   if (delta == null || delta === 0) return null;
   const up = delta > 0;
   return (
     <span className={`trend ${up ? "up" : "down"}`} title={`${up ? "+" : ""}${delta} vs previous snapshot`}>
-      {up ? "▲" : "▼"} {numberFmt(Math.abs(delta))}
+      {up ? <CaretUp size={11} weight="fill" /> : <CaretDown size={11} weight="fill" />}
+      {numberFmt(Math.abs(delta))}
     </span>
   );
 }

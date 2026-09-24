@@ -15,22 +15,33 @@ import ChannelHealth from "../tabs/ChannelHealth.jsx";
 import Utilization from "../tabs/Utilization.jsx";
 import Neo4jGraph from "../tabs/Neo4jGraph.jsx";
 import RCA from "../tabs/RCA.jsx";
+import {
+  FolderGit2,
+  Ticket,
+  ScrollText,
+  FlaskConical,
+  Copy,
+  Workflow,
+  Activity,
+  BarChart3,
+  Network,
+  SearchCode,
+} from "lucide-react";
 // import RingStudio from "../tabs/RingStudio.jsx";
 // import ZohoTickets from "../tabs/ZohoTickets.jsx";
 
-// Tab registry — order matches the original UI. "docs" is intentionally absent:
-// the Documentation portal is a separate route, not a tab here.
+// Tab registry with icons for modern sidebar navigation
 const TABS = [
-  { key: "repos", label: "Repositories", Component: Repositories },
-  { key: "jira", label: "Jira Tickets & Insights", Component: JiraTickets },
-  { key: "logs", label: "Logs", Component: Logs },
-  { key: "testcases", label: "Test Cases", Component: TestCases },
-  { key: "similar", label: "Similar Tickets", Component: SimilarTickets },
-  { key: "workflows", label: "Workflows", Component: Workflows },
-  { key: "channels", label: "Channel Health", Component: ChannelHealth },
-  { key: "utilization", label: "Utilization", Component: Utilization },
-  { key: "neo4j", label: "Neo4j Graph", Component: Neo4jGraph },
-  { key: "rca", label: "RCA", Component: RCA },
+  { key: "repos", label: "Repositories", icon: FolderGit2, Component: Repositories },
+  { key: "jira", label: "Jira Tickets & Insights", icon: Ticket, Component: JiraTickets },
+  { key: "logs", label: "Logs", icon: ScrollText, Component: Logs },
+  { key: "testcases", label: "Test Cases", icon: FlaskConical, Component: TestCases },
+  { key: "similar", label: "Similar Tickets", icon: Copy, Component: SimilarTickets },
+  { key: "workflows", label: "Workflows", icon: Workflow, Component: Workflows },
+  { key: "channels", label: "Channel Health", icon: Activity, Component: ChannelHealth },
+  { key: "utilization", label: "Utilization", icon: BarChart3, Component: Utilization },
+  { key: "neo4j", label: "Neo4j Graph", icon: Network, Component: Neo4jGraph },
+  { key: "rca", label: "RCA", icon: SearchCode, Component: RCA },
   // { key: "rings", label: "Ring Studio", Component: RingStudio },
   // { key: "zoho", label: "Zoho Tickets", Component: ZohoTickets },
 ];
@@ -275,56 +286,71 @@ export default function AdminDashboard() {
           }}
         />
       )}
-      <main className="dash full-width-layout">
-        <section className="dash-main">
+      <div className="dash-sidebar-layout">
+        {/* Modern Sidebar Navigation */}
+        <aside className="dash-sidebar">
+          <div>
+            <div className="dash-sidebar-header">Modules</div>
+            <nav className="dash-sidebar-nav">
+              {visibleTabs.map((t) => {
+                const IconComponent = t.icon;
+                const isActive = activeTab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    data-slot="button"
+                    className={`dash-sidebar-btn${isActive ? " active" : ""}`}
+                    onClick={() => handleTabChange(t.key)}
+                  >
+                    {IconComponent && <IconComponent size={16} className="sidebar-icon" />}
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {status.msg && (
+            <div className="dash-sidebar-footer">
+              <div className={`status-pill ${status.cls}`} style={{ width: "100%", justifyContent: "center" }}>
+                {status.msg}
+              </div>
+            </div>
+          )}
+        </aside>
+
+        {/* Dashboard Main Content Area */}
+        <main className="dash-content-area">
           {visibleTabs.length === 0 ? (
             <EmptyState hasDocs={hasTab("docs")} />
           ) : (
-            <>
-              <div className="tab-bar-container">
-                <nav className="tab-nav">
-                  {visibleTabs.map((t) => (
-                    <button
-                      key={t.key}
-                      className={`tab-btn${activeTab === t.key ? " active" : ""}`}
-                      onClick={() => handleTabChange(t.key)}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </nav>
-                {status.msg && (
-                  <div className={`status-pill ${status.cls}`}>{status.msg}</div>
-                )}
+            ActiveComponent && (
+              <div className="tab-pane-wrapper">
+                <ActiveComponent
+                  repos={repos}
+                  excluded={excluded}
+                  selected={selected}
+                  setSelected={setSelected}
+                  reloadRepos={loadRepositories}
+                  embeddingModel={options.embeddingModel}
+                  setStatus={setStatus}
+                  downloading={codeReportGenerating}
+                  setDownloading={setCodeReportGenerating}
+                  // Controls passed to Repositories tab
+                  options={options}
+                  setOption={setOption}
+                  trigger={trigger}
+                  busy={busy}
+                  job={job}
+                  stats={stats}
+                  embedRefreshKey={embedRefreshKey}
+                />
               </div>
-
-              {ActiveComponent && (
-                <div className="tab-pane-wrapper">
-                  <ActiveComponent
-                    repos={repos}
-                    excluded={excluded}
-                    selected={selected}
-                    setSelected={setSelected}
-                    reloadRepos={loadRepositories}
-                    embeddingModel={options.embeddingModel}
-                    setStatus={setStatus}
-                    downloading={codeReportGenerating}
-                    setDownloading={setCodeReportGenerating}
-                    // Controls passed to Repositories tab
-                    options={options}
-                    setOption={setOption}
-                    trigger={trigger}
-                    busy={busy}
-                    job={job}
-                    stats={stats}
-                    embedRefreshKey={embedRefreshKey}
-                  />
-                </div>
-              )}
-            </>
+            )
           )}
-        </section>
-      </main>
+        </main>
+      </div>
     </>
   );
 }
