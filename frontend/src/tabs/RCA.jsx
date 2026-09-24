@@ -10,15 +10,12 @@ import {
   SpinnerGap,
   WarningCircle,
   Database,
-  CaretDown,
-  CaretUp,
   GitBranch,
   CheckCircle,
   Question,
   Lightbulb,
   ListChecks,
   Code,
-  Article,
   Info,
 } from "@phosphor-icons/react";
 
@@ -561,11 +558,17 @@ function summarizeInput(input) {
     .join(", ");
 }
 
+function safeText(val) {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "object") {
+    return val.text || val.detail || val.summary || val.description || val.message || "";
+  }
+  return String(val);
+}
+
 // ── Beautiful Structured Diagnosis Component ──
 function StructuredDiagnosis({ run }) {
-  const [viewRaw, setViewRaw] = useState(false);
-  const [showTrace, setShowTrace] = useState(false);
-
   const doc = run?.document || run?.diagnosis || {};
   const rootCause = doc.root_cause || "Undetermined";
   const status = doc.root_cause_status || "undetermined";
@@ -655,7 +658,7 @@ function StructuredDiagnosis({ run }) {
           }}
         >
           <div style={{ fontWeight: "700", fontSize: "14.5px", marginBottom: "4px", color: isMostLikely ? "#b45309" : "#047857" }}>
-            {rootCause}
+            {safeText(rootCause)}
           </div>
           {location && location !== "Not localized" && (
             <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--muted, #64748b)", marginTop: "8px" }}>
@@ -673,7 +676,7 @@ function StructuredDiagnosis({ run }) {
             </div>
             <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "12.5px", color: "var(--muted, #64748b)", lineHeight: "1.5" }}>
               {extraEvidence.map((ev, i) => (
-                <li key={i}>{ev}</li>
+                <li key={i}>{safeText(ev)}</li>
               ))}
             </ul>
           </div>
@@ -713,7 +716,7 @@ function StructuredDiagnosis({ run }) {
                 }}
               >
                 <CheckCircle size={17} weight="fill" style={{ color: "#2563eb", flexShrink: 0, marginTop: "2px" }} />
-                <span>{step}</span>
+                <span>{safeText(step)}</span>
               </div>
             ))}
           </div>
@@ -741,7 +744,7 @@ function StructuredDiagnosis({ run }) {
           ) : (
             <ul style={{ margin: 0, paddingLeft: "16px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--ink-soft, #334155)" }}>
               {facts.map((f, i) => (
-                <li key={i} style={{ marginBottom: "4px" }}>{f}</li>
+                <li key={i} style={{ marginBottom: "4px" }}>{safeText(f)}</li>
               ))}
             </ul>
           )}
@@ -766,7 +769,7 @@ function StructuredDiagnosis({ run }) {
           ) : (
             <ul style={{ margin: 0, paddingLeft: "16px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--ink-soft, #334155)" }}>
               {inferences.map((inf, i) => (
-                <li key={i} style={{ marginBottom: "4px" }}>{inf}</li>
+                <li key={i} style={{ marginBottom: "4px" }}>{safeText(inf)}</li>
               ))}
             </ul>
           )}
@@ -791,7 +794,7 @@ function StructuredDiagnosis({ run }) {
           ) : (
             <ul style={{ margin: 0, paddingLeft: "16px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--ink-soft, #334155)" }}>
               {unknowns.map((u, i) => (
-                <li key={i} style={{ marginBottom: "4px" }}>{u}</li>
+                <li key={i} style={{ marginBottom: "4px" }}>{safeText(u)}</li>
               ))}
             </ul>
           )}
@@ -813,109 +816,43 @@ function StructuredDiagnosis({ run }) {
             Evidence Artifacts ({evidenceList.length})
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "10px" }}>
-            {evidenceList.map((ev, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "10px 12px",
-                  background: "var(--surface-2, #f8fafc)",
-                  border: "1px solid var(--line, #e2e8f0)",
-                  borderRadius: "6px",
-                  fontSize: "12.5px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", color: "var(--ink, #0f172a)", marginBottom: "4px" }}>
-                  <span style={{ textTransform: "uppercase", fontSize: "10.5px", padding: "2px 6px", background: "rgba(37,99,235,0.08)", color: "#2563eb", borderRadius: "4px" }}>
-                    {ev.category || "Evidence"}
-                  </span>
-                  <span>{ev.source || "Source"}</span>
+            {evidenceList.map((ev, i) => {
+              const category = (typeof ev === "object" && (ev.category || ev.type)) || "Evidence";
+              const ref = typeof ev === "object" ? ev.ref || ev.source || ev.pointer || "" : "";
+              const detail =
+                typeof ev === "string"
+                  ? ev
+                  : ev.detail || ev.summary || ev.text || ev.message || ev.description || (ref ? `Ref: ${ref}` : "");
+
+              if (!detail && !ref) return null;
+
+              return (
+                <div
+                  key={i}
+                  style={{
+                    padding: "10px 14px",
+                    background: "var(--surface-2, #f8fafc)",
+                    border: "1px solid var(--line, #e2e8f0)",
+                    borderRadius: "6px",
+                    fontSize: "12.5px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", color: "var(--ink, #0f172a)", marginBottom: "6px" }}>
+                    <span style={{ textTransform: "uppercase", fontSize: "10.5px", padding: "2px 6px", background: "rgba(37,99,235,0.08)", color: "#2563eb", borderRadius: "4px" }}>
+                      {category}
+                    </span>
+                    {ref ? <span style={{ fontSize: "12px", color: "var(--muted, #64748b)" }}><code>{ref}</code></span> : null}
+                  </div>
+                  <div style={{ color: "var(--ink-soft, #334155)", lineHeight: "1.5" }}>
+                    {detail}
+                  </div>
                 </div>
-                <div style={{ color: "var(--muted, #64748b)", lineHeight: "1.4" }}>
-                  {ev.summary || String(ev)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
-      )}
-
-      {/* ── Collapsible Raw Markdown & Full Agent Trace ── */}
-      <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
-        <button
-          onClick={() => setViewRaw((v) => !v)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            background: "none",
-            border: "none",
-            color: "var(--accent-strong, #2563eb)",
-            fontWeight: "600",
-            fontSize: "13px",
-            cursor: "pointer",
-            padding: 0,
-            width: "auto",
-          }}
-        >
-          <Article size={15} />
-          <span>{viewRaw ? "Hide" : "View"} Raw Markdown Report</span>
-        </button>
-
-        <button
-          onClick={() => setShowTrace((s) => !s)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            background: "none",
-            border: "none",
-            color: "var(--accent-strong, #2563eb)",
-            fontWeight: "600",
-            fontSize: "13px",
-            cursor: "pointer",
-            padding: 0,
-            width: "auto",
-          }}
-        >
-          {showTrace ? <CaretUp size={14} /> : <CaretDown size={14} />}
-          <span>{showTrace ? "Hide" : "View"} Full Agent Trace JSON ({run.agent_trace?.length || 0} steps)</span>
-        </button>
-      </div>
-
-      {viewRaw && (
-        <div
-          style={{
-            background: "var(--surface-2, #f8fafc)",
-            border: "1px solid var(--line, #e2e8f0)",
-            borderRadius: "8px",
-            padding: "16px 20px",
-            fontSize: "13px",
-            lineHeight: "1.6",
-            color: "var(--ink, #0f172a)",
-          }}
-        >
-          <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
-            {run.markdown || JSON.stringify(doc, null, 2)}
-          </pre>
-        </div>
-      )}
-
-      {showTrace && (
-        <pre
-          style={{
-            marginTop: "6px",
-            padding: "14px",
-            background: "#0f172a",
-            color: "#f8fafc",
-            borderRadius: "8px",
-            fontSize: "12px",
-            maxHeight: "350px",
-            overflow: "auto",
-          }}
-        >
-          {JSON.stringify(run.agent_trace, null, 2)}
-        </pre>
       )}
     </div>
   );
 }
+
