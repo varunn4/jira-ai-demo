@@ -371,7 +371,8 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
     ticket_found = False
     if thread_ts:
         try:
-            replier = Workflow2Replier(settings=settings, prompt_store=prompt_store)
+            store = PromptStore()
+            replier = Workflow2Replier(settings=settings, prompt_store=store)
             res = replier.reply(
                 Workflow2ReplyRequest(
                     slack_thread_ts=thread_ts,
