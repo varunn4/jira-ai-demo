@@ -129,6 +129,7 @@ def get_settings_view(_user: CurrentUser = Depends(require_tab("repos"))) -> dic
         "anthropic_has_key": bool(db_items.get("anthropic_api_key", getattr(settings, "anthropic_api_key", ""))),
         "anthropic_model": db_items.get("anthropic_model", getattr(settings, "anthropic_model", "")),
         "slack_bot_token_masked": _mask_secret(db_items.get("slack_bot_token", getattr(settings, "slack_bot_token", ""))),
+        "slack_has_token": bool(db_items.get("slack_bot_token", getattr(settings, "slack_bot_token", ""))),
         "slack_channel_id": db_items.get("slack_channel_id", getattr(settings, "slack_channel_id", "")),
         "qdrant_url": db_items.get("qdrant_url", getattr(settings, "qdrant_url", "")),
         "ollama_url": db_items.get("ollama_url", getattr(settings, "ollama_url", "")),
@@ -462,6 +463,48 @@ def test_n8n_connection(
         return {"success": False, "error": f"Connection timed out connecting to n8n at {base_url}."}
     except Exception as exc:
         return {"success": False, "error": f"Failed to reach n8n: {exc}"}
+
+
+@router.post("/test-slack")
+def test_slack_connection(
+    payload: dict[str, Any],
+    _user: CurrentUser = Depends(require_tab("repos")),
+) -> dict[str, Any]:
+    """Test Slack bot connection and dispatch a ping message."""
+    db_items = get_all_user_settings(settings, user_id=getattr(_user, "id", None), user_email=getattr(_user, "email", None))
+    token = (payload.get("slack_bot_token") or "").strip()
+    channel_id = (payload.get("slack_channel_id") or "").strip()
+
+    if not token or "..." in token:
+        token = db_items.get("slack_bot_token", getattr(settings, "slack_bot_token", ""))
+    if not channel_id:
+        channel_id = db_items.get("slack_channel_id", getattr(settings, "slack_channel_id", ""))
+
+    if not token:
+        return {"success": False, "error": "Slack Bot Token (xoxb-...) is required."}
+    if not channel_id:
+        return {"success": False, "error": "Slack Channel ID is required (e.g. C0C3N8E9807)."}
+
+    from dataclasses import replace
+    from app.slack_client import SlackClient
+    test_cfg = replace(settings, slack_bot_token=token, slack_default_channel_id=channel_id, governor_notify_channel_id=channel_id)
+    try:
+        client = SlackClient(test_cfg)
+        res = client.post_message(
+            channel_id=channel_id,
+            text="⚡ *AI Governor Health Check* — Slack bot connection verified successfully from the System Configuration panel.",
+        )
+        if res.get("ok") or res.get("sent"):
+            return {
+                "success": True,
+                "message": f"Successfully connected to Slack and posted test ping to channel {channel_id}!",
+                "channel_id": channel_id,
+            }
+        return {"success": False, "error": f"Slack API error: {res.get('error', 'unknown error')}"}
+    except Exception as exc:
+        log.exception("Slack test connection failed")
+        return {"success": False, "error": str(exc)}
+
 
 
 # @router.post("/test-zoho")

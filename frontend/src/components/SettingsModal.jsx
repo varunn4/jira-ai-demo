@@ -46,6 +46,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     jira_has_token: false,
     openai_has_key: false,
     anthropic_has_key: false,
+    slack_has_token: false,
     n8n_has_key: false,
     zoho_has_client_secret: false,
     zoho_has_refresh_token: false,
@@ -73,6 +74,9 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
   const [llmTestResult, setLlmTestResult] = useState(null);
   const [testingLlm, setTestingLlm] = useState(false);
 
+  const [slackTestResult, setSlackTestResult] = useState(null);
+  const [testingSlack, setTestingSlack] = useState(false);
+
   const [n8nTestResult, setN8nTestResult] = useState(null);
   const [testingN8n, setTestingN8n] = useState(false);
 
@@ -92,6 +96,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
     setRepoValidation(null);
     setJiraTestResult(null);
     setLlmTestResult(null);
+    setSlackTestResult(null);
 
     try {
       const [data, statusData] = await Promise.all([
@@ -136,6 +141,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           jira_has_token: data.jira_has_token,
           openai_has_key: data.openai_has_key,
           anthropic_has_key: data.anthropic_has_key,
+          slack_has_token: data.slack_has_token,
           n8n_has_key: data.n8n_has_key,
           zoho_has_client_secret: data.zoho_has_client_secret,
           zoho_has_refresh_token: data.zoho_has_refresh_token,
@@ -146,7 +152,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
           jira_api_token: !data.jira_has_token,
           openai_api_key: !data.openai_has_key,
           anthropic_api_key: !data.anthropic_has_key,
-          slack_bot_token: !data.slack_bot_token_masked,
+          slack_bot_token: !data.slack_has_token,
           n8n_api_key: !data.n8n_has_key,
           zoho_client_secret: !data.zoho_has_client_secret,
           zoho_refresh_token: !data.zoho_has_refresh_token,
@@ -275,6 +281,25 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
       setLlmTestResult({ success: false, error: err.message });
     } finally {
       setTestingLlm(false);
+    }
+  }
+
+  async function handleTestSlack() {
+    setTestingSlack(true);
+    setSlackTestResult(null);
+    try {
+      const res = await apiFetch("/api/settings/test-slack", {
+        method: "POST",
+        body: {
+          slack_bot_token: formData.slack_bot_token,
+          slack_channel_id: formData.slack_channel_id,
+        },
+      });
+      setSlackTestResult(res);
+    } catch (err) {
+      setSlackTestResult({ success: false, error: err.message });
+    } finally {
+      setTestingSlack(false);
     }
   }
 
@@ -942,54 +967,78 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
                   <div className="form-grid-2">
                     <div className="form-group">
                       <label className="field-label">Slack Bot Token</label>
-                      <input
-                        type="password"
-                        className="field-input"
-                        placeholder="xoxb-..."
-                        value={formData.slack_bot_token}
-                        onChange={(e) => handleChange("slack_bot_token", e.target.value)}
-                      />
+                      {meta.slack_has_token && !editSecrets.slack_bot_token ? (
+                        <div className="secret-saved-row">
+                          <span className="secret-indicator">🔒 Token configured in database (Masked)</span>
+                          <button
+                            type="button"
+                            className="btn-text-action"
+                            onClick={() => setEditSecrets((p) => ({ ...p, slack_bot_token: true }))}
+                          >
+                            Change Token
+                          </button>
+                        </div>
+                      ) : (
+                        <input
+                          type="password"
+                          name="settings_slack_bot_token_field"
+                          autoComplete="new-password"
+                          data-lpignore="true"
+                          className="field-input"
+                          placeholder="xoxb-..."
+                          value={formData.slack_bot_token}
+                          onChange={(e) => handleChange("slack_bot_token", e.target.value)}
+                        />
+                      )}
                     </div>
                     <div className="form-group">
                       <label className="field-label">Default Slack Channel ID</label>
                       <input
                         type="text"
+                        name="settings_slack_channel_id_field"
+                        autoComplete="off"
+                        data-lpignore="true"
                         className="field-input"
-                        placeholder="C1234567890"
+                        placeholder="e.g. C0C3N8E9807"
                         value={formData.slack_channel_id}
                         onChange={(e) => handleChange("slack_channel_id", e.target.value)}
                       />
                     </div>
                   </div>
 
+                  <div style={{ marginTop: "12px" }}>
+                    <button
+                      type="button"
+                      className="action-btn"
+                      onClick={handleTestSlack}
+                      disabled={testingSlack}
+                    >
+                      {testingSlack ? "Testing Slack..." : "⚡ Test Slack Bot Ping"}
+                    </button>
+                  </div>
+
+                  {slackTestResult && (
+                    <div
+                      className={`validation-box ${slackTestResult.success ? "box-success" : "box-danger"}`}
+                      style={{ marginTop: "12px" }}
+                    >
+                      {slackTestResult.success ? (
+                        <div>
+                          <div className="box-title">✅ Slack Connection Verified!</div>
+                          <div className="box-sub">{slackTestResult.message}</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="box-title">❌ Slack Test Failed</div>
+                          <div className="box-sub">{slackTestResult.error}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="callout callout-info" style={{ marginTop: "14px" }}>
                     <strong>💬 Slack Bot Integration:</strong> Alerts, reviews, and autonomous approvals are dispatched directly to your Slack channel. Replying in threads allows interactive requirement refinement.
                   </div>
-
-                  {/* Infrastructure URLs (Handled automatically via server environment)
-                  <div className="form-grid-2" style={{ marginTop: "14px" }}>
-                    <div className="form-group">
-                      <label className="field-label">Qdrant Vector DB URL</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="e.g. http://qdrant:6333 or http://localhost:6333"
-                        value={formData.qdrant_url}
-                        onChange={(e) => handleChange("qdrant_url", e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="field-label">Ollama Embeddings URL</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="e.g. http://ollama:11434 or http://localhost:11434"
-                        value={formData.ollama_url}
-                        onChange={(e) => handleChange("ollama_url", e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  */}
                 </div>
               )}
             </>
