@@ -429,15 +429,38 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
         except Exception as exc:
             log.warning("Failed processing Jira key lookup: %s", exc)
 
-    # 3. Fallback: General AI Governor Scrum Master conversational reply
+    # 3. Fallback: General AI Governor Scrum Master conversational reply with live Jira context
     try:
+        jira_context = ""
+        if settings.database_url:
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+                with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+                    rows = conn.execute(
+                        "SELECT ticket_key, summary, status, priority, assignee_name FROM jira_ticket_cache ORDER BY updated_at DESC NULLS LAST LIMIT 15"
+                    ).fetchall()
+                    if not rows and settings.jira_base_url and settings.jira_email and settings.jira_api_token:
+                        from app.jira_fetcher import fetch_all_tickets
+                        fetch_all_tickets(force_refresh=True)
+                        rows = conn.execute(
+                            "SELECT ticket_key, summary, status, priority, assignee_name FROM jira_ticket_cache ORDER BY updated_at DESC NULLS LAST LIMIT 15"
+                        ).fetchall()
+                    if rows:
+                        lines = [f"- **{r['ticket_key']}**: \"{r['summary']}\" (Status: {r['status'] or 'Open'}, Assignee: {r['assignee_name'] or 'Unassigned'}, Priority: {r['priority'] or 'Medium'})" for r in rows]
+                        jira_context = "\n\nAvailable Jira tickets in workspace:\n" + "\n".join(lines)
+            except Exception as j_exc:
+                log.warning("Could not fetch jira cache context for slack event: %s", j_exc)
+
         llm = build_llm_client(settings)
+        prompt = f"User message: {text}{jira_context}"
         bot_reply = llm.complete(
             system_prompt=(
                 "You are AI Governor, an autonomous Scrum Master and delivery governor assisting the team on Slack. "
-                "Provide clear, complete, helpful, professional, and actionable responses."
+                "Provide clear, complete, helpful, professional, and actionable responses. "
+                "When referencing tickets, ALWAYS use the real Jira ticket keys and details provided in the context."
             ),
-            user_message=text,
+            user_message=prompt,
             max_tokens=800,
         ).strip()
         slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=target_thread)
