@@ -107,7 +107,7 @@ def get_settings_view(_user: CurrentUser = Depends(require_tab("repos"))) -> dic
 
     # User-specific credentials and repo configs should only come from user's own saved settings
     return {
-        "github_source_type": db_items.get("github_source_type", "org"),
+        "github_source_type": db_items.get("github_source_type", "urls"),
         "github_org_or_user": db_items.get("github_org_or_user", ""),
         "github_repo_urls": db_items.get("github_repo_urls", ""),
         "github_token_masked": _mask_secret(db_items.get("github_token", "")),

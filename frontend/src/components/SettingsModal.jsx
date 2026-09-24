@@ -10,7 +10,7 @@ export default function SettingsModal({ isOpen, onClose, onSaved }) {
 
   // Raw form data
   const [formData, setFormData] = useState({
-    github_source_type: "org",
+    github_source_type: "urls",
     github_org_or_user: "",
     github_repo_urls: "",
     github_token: "",

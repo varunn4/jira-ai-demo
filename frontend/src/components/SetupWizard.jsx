@@ -7,7 +7,7 @@ export default function SetupWizard({ onComplete }) {
 
   // Form State
   const [formData, setFormData] = useState({
-    github_source_type: "org", // 'org' or 'urls'
+    github_source_type: "urls", // 'org' or 'urls'
     github_org_or_user: "",
     github_repo_urls: "",
     github_token: "",
@@ -52,7 +52,7 @@ export default function SetupWizard({ onComplete }) {
         if (settingsRes) {
           setFormData((prev) => ({
             ...prev,
-            github_source_type: settingsRes.github_source_type || "org",
+            github_source_type: settingsRes.github_source_type || "urls",
             github_org_or_user: settingsRes.github_org_or_user || "",
             github_repo_urls: settingsRes.github_repo_urls || "",
             jira_base_url: settingsRes.jira_base_url || "",
