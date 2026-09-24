@@ -66,12 +66,19 @@ class N8nMonitor:
             try:
                 resp = requests.get(url, headers=self._headers(), params=params, timeout=self.timeout)
                 if resp.status_code == 401:
-                    raise N8nMonitorError("n8n rejected the API key (401). Check N8N_API_KEY.")
+                    raise N8nMonitorError("n8n rejected the API key (401). Please verify N8N_API_KEY.")
+                if resp.status_code in (502, 503, 504):
+                    last_exc = N8nMonitorError("n8n instance is currently waking up from idle on Render (502 Gateway). Please click Refresh in 15-20 seconds.")
+                    continue
                 if not resp.ok:
-                    raise N8nMonitorError(f"n8n API error {resp.status_code} for {path}: {resp.text[:200]}")
+                    clean_text = resp.text[:120] if not resp.text.startswith("<!DOCTYPE") else f"HTTP {resp.status_code}"
+                    raise N8nMonitorError(f"n8n API error {resp.status_code} for {path}: {clean_text}")
                 return resp.json()
-            except N8nMonitorError:
-                raise
+            except N8nMonitorError as err:
+                if "401" in str(err):
+                    raise
+                last_exc = err
+                continue
             except Exception as exc:
                 last_exc = exc
                 continue
