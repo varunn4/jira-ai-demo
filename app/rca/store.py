@@ -71,6 +71,7 @@ class RCARunStore:
         if not self.settings.database_url:
             return
         with self._connect() as conn:
+            conn.autocommit = True
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS rca_runs (
@@ -91,27 +92,29 @@ class RCARunStore:
                 )
                 """
             )
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_id INTEGER;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_email TEXT;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS jira_key TEXT;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS localized_repos JSONB NOT NULL DEFAULT '[]'::jsonb;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS candidates JSONB NOT NULL DEFAULT '[]'::jsonb;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS diagnosis JSONB;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS confidence REAL;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS agent_trace JSONB NOT NULL DEFAULT '[]'::jsonb;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS document JSONB;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS error TEXT;")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
-            conn.execute("ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
+            for col_sql in [
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_id INTEGER;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_email TEXT;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS jira_key TEXT;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS localized_repos JSONB NOT NULL DEFAULT '[]'::jsonb;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS candidates JSONB NOT NULL DEFAULT '[]'::jsonb;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS diagnosis JSONB;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS confidence REAL;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS agent_trace JSONB NOT NULL DEFAULT '[]'::jsonb;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS document JSONB;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS error TEXT;",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();",
+                "ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();",
+            ]:
+                try:
+                    conn.execute(col_sql)
+                except Exception:
+                    pass
+
             try:
-                conn.execute("ALTER TABLE rca_runs ALTER COLUMN ticket_key DROP NOT NULL;")
-                conn.execute("UPDATE rca_runs SET jira_key = ticket_key WHERE jira_key IS NULL;")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_rca_runs_key ON rca_runs (jira_key);")
             except Exception:
                 pass
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_rca_runs_key ON rca_runs (jira_key)"
-            )
-            conn.commit()
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 

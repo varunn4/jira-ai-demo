@@ -175,10 +175,12 @@ function SprintFilter() {
   const [project, setProject] = useState("RFT");
   const [loadErr, setLoadErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [saved, setSaved] = useState("");
   const [calibration, setCalibration] = useState(null);
 
   async function load() {
+    setReloading(true);
     setLoadErr("");
     try {
       const [cur, list] = await Promise.all([
@@ -190,8 +192,12 @@ function SprintFilter() {
       setProject(cur.project_key || list.project_key || "RFT");
       setOptions(list.options || []);
       if (list.error) setLoadErr(`Could not list sprints from Jira: ${list.error}`);
+      setSaved("Sprints reloaded");
+      setTimeout(() => setSaved(""), 2500);
     } catch (err) {
       setLoadErr(err.message);
+    } finally {
+      setReloading(false);
     }
     // Calibration involves a Jira history scan — fetch separately so the card
     // renders immediately and the factor fills in when ready.
@@ -215,8 +221,8 @@ function SprintFilter() {
         body: { value },
       });
       setScope(res.scope_label || "");
-      setSaved("Saved");
-      setTimeout(() => setSaved(""), 2500);
+      setSaved("Saved successfully!");
+      setTimeout(() => setSaved(""), 3000);
     } catch (err) {
       setSaved(`Error: ${err.message}`);
     } finally {
@@ -259,7 +265,7 @@ function SprintFilter() {
         <button
           style={{ width: "auto", minHeight: "unset", padding: "6px 16px", fontSize: 13 }}
           onClick={save}
-          disabled={saving}
+          disabled={saving || reloading}
         >
           {saving ? "Saving…" : "Save"}
         </button>
@@ -267,11 +273,12 @@ function SprintFilter() {
           className="secondary"
           style={{ width: "auto", minHeight: "unset", padding: "6px 12px", fontSize: 13 }}
           onClick={load}
+          disabled={saving || reloading}
         >
-          Reload
+          {reloading ? "Reloading…" : "Reload"}
         </button>
         {saved && (
-          <span style={{ fontSize: 12, color: saved.startsWith("Error") ? "var(--danger)" : "var(--ok)" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: saved.startsWith("Error") ? "var(--danger)" : "var(--ok)" }}>
             {saved}
           </span>
         )}
