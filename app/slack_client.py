@@ -50,14 +50,23 @@ class SlackClient:
             db_items = get_all_settings(self.settings)
             if db_items.get("slack_bot_token"):
                 return db_items["slack_bot_token"]
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-            with psycopg2.connect(self.settings.database_url) as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT value FROM app_user_settings WHERE key = 'slack_bot_token' LIMIT 1;")
-                    row = cur.fetchone()
-                    if row and row.get("value"):
-                        return row["value"]
+            if self.settings.database_url:
+                try:
+                    import psycopg
+                    from psycopg.rows import dict_row
+                    with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                        row = conn.execute("SELECT value FROM app_user_settings WHERE key = 'slack_bot_token' LIMIT 1;").fetchone()
+                        if row and row.get("value"):
+                            return row["value"]
+                except Exception:
+                    import psycopg2
+                    from psycopg2.extras import RealDictCursor
+                    with psycopg2.connect(self.settings.database_url) as conn:
+                        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                            cur.execute("SELECT value FROM app_user_settings WHERE key = 'slack_bot_token' LIMIT 1;")
+                            row = cur.fetchone()
+                            if row and row.get("value"):
+                                return row["value"]
         except Exception:
             pass
         return None

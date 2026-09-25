@@ -463,8 +463,12 @@ def create_jira_ticket(
     payload: dict[str, Any],
     _user: CurrentUser = Depends(require_tab("jira")),
 ) -> dict[str, Any]:
-    """Create a new Jira ticket with mandatory field checks and linked repository."""
+    """Create a new Jira ticket with strict AI Governor pre-creation gatekeeping and codebase alignment checks."""
     from app.jira_client import JiraClient
+    from app.slack_client import SlackClient
+    from app.app_settings import get_all_settings
+    from app.workflow1_reviewer import Workflow1Reviewer
+    from app.schemas import Workflow1ReviewRequest
 
     project_key = str(payload.get("project_key") or "SCRUM").strip().upper()
     summary = str(payload.get("summary") or "").strip()
@@ -475,12 +479,101 @@ def create_jira_ticket(
     github_repo_url = str(payload.get("github_repo_url") or "").strip() or None
     pat = str(payload.get("github_pat") or "").strip() or None
 
-    if not summary:
-        raise HTTPException(status_code=400, detail="Summary is required")
+    # 1. Basic Field Validation
+    if not summary or len(summary) < 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Summary is required and must be at least 5 characters long.",
+        )
 
+    if not description or len(description.strip()) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail="Insufficient Context: The AI Governor requires a descriptive Technical Context (minimum 15 characters) to validate engineering requirements.",
+        )
+
+    # Validate that acceptance criteria / test scenarios are included
+    has_criteria = "Acceptance Criteria" in description or "Scenario" in description or "- [" in description
+    if not has_criteria and len(description.strip()) < 30:
+        raise HTTPException(
+            status_code=400,
+            detail="Insufficient Context: At least one Acceptance Criterion / Test Scenario is required for AI Governor requirements validation.",
+        )
+
+    # 2. Ensure Repository Connection & Extract Codebase Context
+    reviewer = Workflow1Reviewer(settings=settings, prompt_store=prompt_store)
+    if github_repo_url:
+        reviewer._ensure_repository_connected(github_repo_url, pat)
+
+    codebase_ctx = reviewer._get_codebase_context(github_repo_url, summary, description)
+
+    # 3. AI Governor Pre-Creation Gatekeeper Evaluation (Codebase Alignment & Quality)
+    eval_payload = {
+        "issueKey": "NEW-TICKET-DRAFT",
+        "summary": summary,
+        "description": description,
+        "assignee": assignee_id or "Unassigned",
+        "priority": priority_name,
+        "issueType": issue_type,
+        "status": "Draft",
+        "reporter": _user.email or "AI Governor",
+        "dueDate": "",
+        "github_repo": github_repo_url or "None provided",
+        "codebase_context": codebase_ctx,
+    }
+
+    try:
+        prompt = reviewer._build_prompt(eval_payload)
+        raw_llm_output = reviewer._call_claude(prompt)
+        model_output = reviewer._parse_llm_output(raw_llm_output)
+    except Exception as eval_exc:
+        log.warning("AI Governor pre-creation evaluation fallback: %s", eval_exc)
+        model_output = {
+            "nature": "satisfied",
+            "llm_review": "AI Governor auto-approved with baseline requirements.",
+            "priority": "P2",
+        }
+
+    # 4. If AI Governor Rejects (Unsatisfied context / codebase misalignment):
+    if model_output.get("nature") != "satisfied":
+        # Post alert to Slack about rejection
+        try:
+            slack_client = SlackClient(settings)
+            db_conf = get_all_settings(settings)
+            target_channel = (
+                settings.governor_notify_channel_id
+                or db_conf.get("governor_notify_channel_id")
+                or settings.slack_default_channel_id
+                or db_conf.get("slack_default_channel_id")
+            )
+            if target_channel:
+                slack_msg = (
+                    f"⚠️ *AI Governor Ticket Rejection Alert*\n"
+                    f"• *Project:* `{project_key}`\n"
+                    f"• *Summary:* *{summary}*\n"
+                    f"• *Repository:* `{github_repo_url or 'None linked'}`\n"
+                    f"• *Status:* ❌ *REJECTED (Unsatisfied / Insufficient Codebase Context)*\n\n"
+                    f"{model_output['llm_review']}"
+                )
+                slack_client.post_message(channel_id=target_channel, text=slack_msg)
+        except Exception as slack_exc:
+            log.warning("Slack rejection notice skipped: %s", slack_exc)
+
+        return {
+            "status": "rejected",
+            "nature": "unsatisfied",
+            "review": model_output["llm_review"],
+            "priority": model_output.get("priority", "P3"),
+            "summary": summary,
+        }
+
+    # 5. AI Governor Approved -> Create in Jira Cloud & Auto-Transition
     jc = JiraClient(settings)
     if not jc.is_configured():
-        raise HTTPException(status_code=400, detail="Jira Cloud is not configured in Settings")
+        raise HTTPException(
+            status_code=400,
+            detail="Jira Cloud credentials are not configured in Settings. Please configure Jira to create tickets.",
+        )
 
     try:
         created = jc.create_ticket(
@@ -493,23 +586,99 @@ def create_jira_ticket(
             github_repo_url=github_repo_url,
         )
         issue_key = created.get("key")
+        if not issue_key:
+            raise RuntimeError(created.get("reason") or "Jira did not return a valid issue key")
 
-        # Auto-bind repository if specified
-        if github_repo_url and issue_key:
+        ticket_url = f"{jc.base_url}/browse/{issue_key}" if issue_key else ""
+
+        # Transition Jira issue to AI Approved and add approval comment
+        try:
+            jc.add_comment(
+                issue_key,
+                f"🤖 *AI Governor Validation*: **AI APPROVED**\n\n{model_output['llm_review']}",
+            )
+            jc.transition_to_approved(issue_key)
+        except Exception as trans_exc:
+            log.warning("Jira comment/transition skipped for %s: %s", issue_key, trans_exc)
+
+        # Synchronize directly into local PostgreSQL jira_ticket_cache
+        if settings.database_url and issue_key:
             try:
-                from app.workflow1_reviewer import Workflow1Reviewer
-                reviewer = Workflow1Reviewer(settings=settings, prompt_store=prompt_store)
-                reviewer._ensure_repository_connected(github_repo_url, pat)
-            except Exception as exc:
-                log.warning("Repo auto-clone skipped for %s: %s", github_repo_url, exc)
+                import psycopg
+                from datetime import datetime, timezone
+                with psycopg.connect(settings.database_url) as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO jira_ticket_cache (
+                            ticket_key, project_key, summary, description, status, issue_type, priority, updated_at, fetched_at, data
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        ON CONFLICT (ticket_key) DO UPDATE SET
+                            summary = EXCLUDED.summary,
+                            description = EXCLUDED.description,
+                            status = EXCLUDED.status,
+                            issue_type = EXCLUDED.issue_type,
+                            priority = EXCLUDED.priority,
+                            updated_at = EXCLUDED.updated_at,
+                            fetched_at = EXCLUDED.fetched_at;
+                        """,
+                        (
+                            issue_key,
+                            project_key,
+                            summary,
+                            description,
+                            "AI Approved",
+                            issue_type,
+                            priority_name,
+                            datetime.now(timezone.utc),
+                            datetime.now(timezone.utc),
+                            psycopg.types.json.Jsonb(created),
+                        ),
+                    )
+                    conn.commit()
+            except Exception as cache_exc:
+                log.warning("Could not upsert created ticket into cache: %s", cache_exc)
+
+        # Broadcast Slack Governor Approval
+        slack_notified = False
+        try:
+            slack_client = SlackClient(settings)
+            db_conf = get_all_settings(settings)
+            target_channel = (
+                settings.governor_notify_channel_id
+                or db_conf.get("governor_notify_channel_id")
+                or settings.slack_default_channel_id
+                or db_conf.get("slack_default_channel_id")
+            )
+            if target_channel:
+                msg = (
+                    f"🎯 *New Jira Engineering Ticket Created & AI Approved*\n"
+                    f"• *Ticket:* <{ticket_url}|{issue_key}> ({issue_type})\n"
+                    f"• *Project:* `{project_key}`\n"
+                    f"• *Summary:* *{summary}*\n"
+                    f"• *Priority:* `{model_output.get('priority', priority_name)}`\n"
+                    f"• *Repository:* `{github_repo_url or 'None linked'}`\n"
+                    f"• *AI Governor Status:* ✅ **AI APPROVED**\n\n"
+                    f"{model_output['llm_review']}"
+                )
+                res = slack_client.post_message(channel_id=target_channel, text=msg)
+                slack_notified = res.sent
+        except Exception as slack_exc:
+            log.warning("Slack approval broadcast failed: %s", slack_exc)
 
         return {
-            "status": "success",
+            "status": "approved",
+            "nature": "satisfied",
             "key": issue_key,
             "id": created.get("id"),
-            "url": f"{jc.base_url}/browse/{issue_key}" if issue_key else "",
+            "url": ticket_url,
             "summary": summary,
+            "slack_notified": slack_notified,
+            "review": model_output["llm_review"],
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         log.exception("Ticket creation failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to create Jira ticket: {str(exc)}")

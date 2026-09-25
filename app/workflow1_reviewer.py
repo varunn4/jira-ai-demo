@@ -65,13 +65,20 @@ class Workflow1Reviewer:
         if not priority_val or priority_val.lower() in {"none", "null", ""}:
             missing_fields.append("Priority is required (P0 - P4). Please set the ticket priority in Jira.")
 
-        # 3. GitHub Repository Validation
+        # 3. GitHub Repository Validation & Access Check
         if not repo_url:
             missing_fields.append("GitHub Repository URL is required. Please link the GitHub repository in Jira description.")
         else:
             conn_res = self._ensure_repository_connected(repo_url, repo_pat)
             if not conn_res.get("connected"):
-                LOGGER.info("Repository '%s' status: %s", repo_url, conn_res.get("error"))
+                LOGGER.warning("Repository '%s' inaccessible: %s", repo_url, conn_res.get("error"))
+                missing_fields.append(
+                    f"GitHub Repository '{repo_url}' is inaccessible to the AI Governor ({conn_res.get('error', 'Access denied / invalid URL')}). Please check repository permissions or PAT token."
+                )
+
+        # 4. Codebase Context Extraction & Alignment
+        codebase_ctx = self._get_codebase_context(repo_url, request.summary, request.description)
+        payload["codebase_context"] = codebase_ctx
 
         # If any hard mandatory field is missing, reject immediately with structured guidance
         if missing_fields:
@@ -88,7 +95,7 @@ class Workflow1Reviewer:
                 "priority": priority_val if priority_val in VALID_PRIORITIES else "P3",
             }
         else:
-            # All mandatory fields present -> Call LLM for Acceptance Criteria & Quality Review
+            # All mandatory fields present -> Call LLM for Acceptance Criteria & Codebase Quality Review
             try:
                 LOGGER.info("workflow1 step started: build_llm_prompt prompt_name=workflow1_prompt")
                 prompt = self._build_prompt(payload)
@@ -165,30 +172,54 @@ class Workflow1Reviewer:
             LOGGER.exception("workflow1 step failed: save_to_db")
             raise
 
-        # Auto-transition in Jira Cloud if satisfied and Jira is configured
-        if model_output["nature"] == "satisfied":
-            try:
-                from app.jira_client import JiraClient
-                jc = JiraClient(self.settings)
-                if jc.is_configured():
+        # ── Jira Reverse Sync: Add Comment & Auto-Transition ──
+        try:
+            from app.jira_client import JiraClient
+            jc = JiraClient(self.settings)
+            if jc.is_configured():
+                if model_output["nature"] == "satisfied":
                     jc.add_comment(
                         request.issueKey,
                         f"🤖 *AI Governor Validation*: **AI APPROVED**\n\n{model_output['llm_review']}",
                     )
                     trans_res = jc.transition_to_approved(request.issueKey)
                     LOGGER.info("workflow1 auto-transition for %s: %s", request.issueKey, trans_res)
-            except Exception as exc:
-                LOGGER.warning("workflow1 auto-transition skipped/failed for %s: %s", request.issueKey, exc)
+                else:
+                    jc.add_comment(
+                        request.issueKey,
+                        f"⚠️ *AI Governor Validation*: **UNSATISFIED / REJECTED**\n\n{model_output['llm_review']}",
+                    )
+        except Exception as exc:
+            LOGGER.warning("workflow1 Jira comment/transition skipped/failed for %s: %s", request.issueKey, exc)
 
-        # Dispatch Slack Governor notification directly if configured
-        target_channel = assignee_match.channel_id or reporter_match.channel_id
-        if target_channel and self.settings.slack_bot_token:
-            try:
-                from app.slack_client import SlackClient
-                sc = SlackClient(self.settings)
-                sc.probe_channel(channel_id=target_channel, text=model_output["llm_review"])
-            except Exception as exc:
-                LOGGER.warning("workflow1 direct Slack notification skipped: %s", exc)
+        # ── Dispatch Slack Governor Notification ──
+        try:
+            from app.slack_client import SlackClient
+            from app.app_settings import get_all_settings
+            sc = SlackClient(self.settings)
+            db_conf = get_all_settings(self.settings)
+            
+            target_channel = (
+                assignee_match.channel_id
+                or reporter_match.channel_id
+                or self.settings.governor_notify_channel_id
+                or db_conf.get("governor_notify_channel_id")
+                or self.settings.slack_default_channel_id
+                or db_conf.get("slack_default_channel_id")
+            )
+            if target_channel:
+                status_emoji = "✅ *AI APPROVED*" if model_output["nature"] == "satisfied" else "⚠️ *REJECTED (Unsatisfied)*"
+                slack_msg = (
+                    f"🤖 *AI Governor Ticket Review: `{request.issueKey}`*\n"
+                    f"• *Status:* {status_emoji}\n"
+                    f"• *Summary:* *{request.summary}*\n"
+                    f"• *Assessed Priority:* `{model_output['priority']}`\n\n"
+                    f"{model_output['llm_review']}"
+                )
+                sc.post_message(channel_id=target_channel, text=slack_msg)
+                LOGGER.info("workflow1 posted Slack review to channel=%s", target_channel)
+        except Exception as exc:
+            LOGGER.warning("workflow1 direct Slack notification skipped: %s", exc)
 
         response = {
             "assignee_channel_id": assignee_match.channel_id,
@@ -201,6 +232,64 @@ class Workflow1Reviewer:
         }
         LOGGER.info("workflow1 completed with response: %s", self._to_log_json(response))
         return response
+
+    def _get_codebase_context(self, repo_url: str | None, summary: str, description: str) -> str:
+        """Scans connected repository structure, readme, and relevant code files for context relevance."""
+        if not repo_url:
+            return "No repository linked or accessible."
+        try:
+            import os
+            from pathlib import Path
+            repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
+
+            candidates = [
+                Path("workspace/repos") / repo_name,
+                Path(self.settings.repository_search_root or "/host-repos") / repo_name,
+                Path(self.settings.repository_host_root or "/host-repos") / repo_name,
+                Path(repo_name),
+            ]
+            repo_path = None
+            for c in candidates:
+                if c.exists() and c.is_dir():
+                    repo_path = c
+                    break
+
+            if not repo_path:
+                return f"Repository '{repo_name}' is declared ({repo_url}) but not yet cloned or indexed in workspace."
+
+            files_list: list[str] = []
+            key_snippets: list[str] = []
+            keywords = [w.lower() for w in re.findall(r"\w{4,}", f"{summary} {description}")]
+
+            for root, dirs, files in os.walk(repo_path):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"node_modules", "dist", "build", "target", "venv", "__pycache__"}]
+                for f in files:
+                    if f.startswith(".") or f.endswith((".png", ".jpg", ".zip", ".lock", ".svg", ".pyc")):
+                        continue
+                    rel_path = os.path.relpath(os.path.join(root, f), repo_path)
+                    files_list.append(rel_path)
+
+                    if any(kw in rel_path.lower() for kw in keywords) or f.lower() in {"readme.md", "package.json", "requirements.txt", "architecture.md"}:
+                        if len(key_snippets) < 5:
+                            try:
+                                content = Path(root, f).read_text(encoding="utf-8", errors="ignore")[:600]
+                                key_snippets.append(f"File `{rel_path}` snippet:\n{content}")
+                            except Exception:
+                                pass
+                    if len(files_list) > 150:
+                        break
+
+            structure_summary = ", ".join(files_list[:40])
+            snippets_text = "\n\n".join(key_snippets) if key_snippets else "No specific matching code files for keywords."
+
+            return (
+                f"Repository Name: {repo_name}\n"
+                f"Key Files & Structure ({len(files_list)} files found):\n{structure_summary}\n\n"
+                f"Relevant Code Snippets / Key Files:\n{snippets_text}"
+            )
+        except Exception as exc:
+            LOGGER.warning("Could not extract codebase context: %s", exc)
+            return f"Codebase context unavailable: {exc}"
 
     def _extract_repo_url(self, payload: dict[str, Any]) -> tuple[str | None, str | None]:
         """Extract GitHub Repo URL and optional PAT from payload or description text."""
@@ -325,22 +414,14 @@ class Workflow1Reviewer:
             return SlackUserMatch(channel_id=fallback_channel_id, email=email, user_id=None)
 
         if not self.settings.database_url:
-            raise RuntimeError("DATABASE_URL is required for workflow1 channel lookup")
+            return SlackUserMatch(channel_id=fallback_channel_id, email=email, user_id=None)
 
+        row = None
         try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-        except ImportError as exc:
-            raise RuntimeError("The 'psycopg2-binary' package is required") from exc
-
-        with psycopg2.connect(self.settings.database_url) as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                LOGGER.info(
-                    "workflow1 db query executing: channelid_table lookup by user_role=%s slack_user_name=%s",
-                    user_role,
-                    user_name,
-                )
-                cursor.execute(
+            import psycopg
+            from psycopg.rows import dict_row
+            with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                row = conn.execute(
                     """
                     SELECT email_id, slack_user_name, channel_id
                     FROM channelid_table
@@ -349,8 +430,26 @@ class Workflow1Reviewer:
                     LIMIT 1
                     """,
                     (user_name,),
-                )
-                row = cursor.fetchone()
+                ).fetchone()
+        except Exception:
+            try:
+                import psycopg2
+                from psycopg2.extras import RealDictCursor
+                with psycopg2.connect(self.settings.database_url) as conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                        cursor.execute(
+                            """
+                            SELECT email_id, slack_user_name, channel_id
+                            FROM channelid_table
+                            WHERE lower(trim(leading '@' from slack_user_name)) =
+                                  lower(trim(leading '@' from %s))
+                            LIMIT 1
+                            """,
+                            (user_name,),
+                        )
+                        row = cursor.fetchone()
+            except Exception as exc:
+                LOGGER.warning("channelid_table query fallback: %s", exc)
 
         if not row:
             LOGGER.info(

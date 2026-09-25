@@ -18,20 +18,45 @@ class JiraClient:
         self.settings = settings
         self._overrides = overrides or {}
 
+    def _get_db_setting(self, key: str) -> str:
+        try:
+            from app.app_settings import get_all_settings
+            db_items = get_all_settings(self.settings)
+            if db_items.get(key):
+                return str(db_items[key]).strip()
+        except Exception:
+            pass
+        return ""
+
     @property
     def base_url(self) -> str:
-        url = (self._overrides.get("jira_base_url") or self.settings.jira_base_url or "").strip().rstrip("/")
+        url = (
+            self._overrides.get("jira_base_url")
+            or self.settings.jira_base_url
+            or self._get_db_setting("jira_base_url")
+            or ""
+        ).strip().rstrip("/")
         if url and not (url.startswith("http://") or url.startswith("https://")):
             url = f"https://{url}"
         return url
 
     @property
     def email(self) -> str:
-        return (self._overrides.get("jira_email") or self.settings.jira_email or "").strip()
+        return (
+            self._overrides.get("jira_email")
+            or self.settings.jira_email
+            or self._get_db_setting("jira_email")
+            or ""
+        ).strip()
 
     @property
     def api_token(self) -> str:
-        return (self._overrides.get("jira_api_token") or self.settings.jira_api_token or "").strip()
+        return (
+            self._overrides.get("jira_api_token")
+            or self.settings.jira_api_token
+            or self._get_db_setting("jira_api_token")
+            or ""
+        ).strip()
 
     def is_configured(self) -> bool:
         return bool(self.base_url and self.email and self.api_token)

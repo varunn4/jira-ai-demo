@@ -8,6 +8,8 @@ import {
   CheckCircle,
   WarningCircle,
   ArrowSquareOut,
+  Trash,
+  ListChecks,
 } from "@phosphor-icons/react";
 
 export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) {
@@ -23,9 +25,11 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
   const [projectKey, setProjectKey] = useState("SCRUM");
   const [issueType, setIssueType] = useState("Task");
   const [summary, setSummary] = useState("");
-  const [description, setDescription] = useState(
-    "### Acceptance Criteria:\n- [ ] Scenario 1: \n- [ ] Scenario 2: \n\n### Technical Context:\n"
-  );
+  const [description, setDescription] = useState("");
+  const [criteriaList, setCriteriaList] = useState([
+    "Scenario 1: ",
+    "Scenario 2: ",
+  ]);
   const [assigneeId, setAssigneeId] = useState("");
   const [priority, setPriority] = useState("Medium");
   const [repoMode, setRepoMode] = useState("connected"); // "connected" | "custom"
@@ -35,11 +39,13 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(null);
+  const [governorReview, setGovernorReview] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
       setError("");
       setSuccess(null);
+      setGovernorReview(null);
       setLoadingContext(true);
       apiFetch("/jira/create-context")
         .then((data) => {
@@ -60,10 +66,39 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
 
   if (!isOpen) return null;
 
+  const handleAddCriteria = () => {
+    setCriteriaList([...criteriaList, ""]);
+  };
+
+  const handleUpdateCriteria = (index, value) => {
+    const updated = [...criteriaList];
+    updated[index] = value;
+    setCriteriaList(updated);
+  };
+
+  const handleRemoveCriteria = (index) => {
+    if (criteriaList.length <= 1) {
+      setCriteriaList([""]);
+      return;
+    }
+    setCriteriaList(criteriaList.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!summary.trim()) {
-      setError("Please enter a ticket summary");
+    if (!summary.trim() || summary.trim().length < 5) {
+      setError("Please enter a descriptive ticket summary (at least 5 characters).");
+      return;
+    }
+
+    if (!description.trim() || description.trim().length < 15) {
+      setError("⚠️ Insufficient Context: The AI Governor requires a descriptive Technical Context (minimum 15 characters) to validate requirements.");
+      return;
+    }
+
+    const validCriteria = criteriaList.map((c) => c.trim()).filter(Boolean);
+    if (validCriteria.length === 0 || validCriteria.every(c => c.length < 4)) {
+      setError("⚠️ Insufficient Context: Please provide at least one specific Acceptance Criterion / Test Scenario.");
       return;
     }
 
@@ -74,9 +109,16 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
       repoUrl = customRepoUrl.trim();
     }
 
+    // Build combined description with markdown criteria
+    let fullDescription = description.trim();
+    if (validCriteria.length > 0) {
+      fullDescription += "\n\n### Acceptance Criteria:\n" + validCriteria.map((c) => `- [ ] ${c}`).join("\n");
+    }
+
     setSubmitting(true);
     setError("");
     setSuccess(null);
+    setGovernorReview(null);
 
     try {
       const res = await apiFetch("/jira/create-ticket", {
@@ -84,7 +126,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
         body: {
           project_key: projectKey,
           summary: summary.trim(),
-          description: description.trim(),
+          description: fullDescription,
           issue_type: issueType,
           assignee_id: assigneeId || null,
           priority: priority,
@@ -93,13 +135,29 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
         },
       });
 
+      if (res.status === "rejected" || res.nature === "unsatisfied") {
+        setGovernorReview({
+          status: "rejected",
+          review: res.review,
+          priority: res.priority,
+        });
+        return;
+      }
+
       setSuccess(res);
+      setGovernorReview({
+        status: "approved",
+        review: res.review,
+        key: res.key,
+        url: res.url,
+      });
+
       if (onTicketCreated) {
         onTicketCreated(res);
       }
       setTimeout(() => {
         onClose();
-      }, 2000);
+      }, 4000);
     } catch (err) {
       setError(err.message || "Failed to create ticket");
     } finally {
@@ -130,7 +188,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
           border: "1px solid var(--line, #e2e8f0)",
           borderRadius: "12px",
           width: "100%",
-          maxWidth: "640px",
+          maxWidth: "680px",
           maxHeight: "90vh",
           overflowY: "auto",
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
@@ -159,7 +217,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
                 Create Jira Engineering Ticket
               </h3>
               <p style={{ margin: 0, fontSize: "12.5px", color: "var(--muted, #64748b)" }}>
-                AI Governor will automatically validate requirements and bind repository.
+                AI Governor analyzes connected repository context & requirements before approving.
               </p>
             </div>
           </div>
@@ -198,34 +256,71 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
           </div>
         )}
 
+        {/* AI Governor Rejection Banner */}
+        {governorReview && governorReview.status === "rejected" && (
+          <div
+            style={{
+              padding: "14px 16px",
+              background: "rgba(245, 158, 11, 0.08)",
+              border: "1px solid rgba(245, 158, 11, 0.3)",
+              borderRadius: "8px",
+              marginBottom: "16px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#b45309", fontWeight: "700", fontSize: "13.5px", marginBottom: "6px" }}>
+              <WarningCircle size={18} weight="fill" />
+              <span>AI Governor Pre-Check: REJECTED (Unsatisfied / Misaligned)</span>
+            </div>
+            <div style={{ fontSize: "12.5px", color: "#334155", lineHeight: "1.5", whiteSpace: "pre-wrap" }}>
+              {governorReview.review}
+            </div>
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
+              👉 Please update your technical description and acceptance criteria to match the connected repository, then submit again.
+            </div>
+          </div>
+        )}
+
+        {/* AI Governor Approved Banner */}
         {success && (
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "10px 14px",
+              flexDirection: "column",
+              gap: "6px",
+              padding: "14px 16px",
               background: "rgba(16, 185, 129, 0.08)",
-              border: "1px solid rgba(16, 185, 129, 0.2)",
-              borderRadius: "6px",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+              borderRadius: "8px",
               color: "#047857",
               fontSize: "13px",
               marginBottom: "16px",
             }}
           >
-            <CheckCircle size={16} weight="fill" />
-            <span>
-              Ticket <strong>{success.key}</strong> created successfully!
-            </span>
-            {success.url && (
-              <a
-                href={success.url}
-                target="_blank"
-                rel="noreferrer"
-                style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", color: "#2563eb", fontWeight: "600" }}
-              >
-                Open in Jira <ArrowSquareOut size={13} />
-              </a>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <CheckCircle size={18} weight="fill" />
+              <span style={{ fontWeight: "700", fontSize: "14px" }}>
+                AI Governor: APPROVED & Created in Jira Cloud!
+              </span>
+              {success.url && (
+                <a
+                  href={success.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", color: "#2563eb", fontWeight: "700" }}
+                >
+                  {success.key} <ArrowSquareOut size={13} />
+                </a>
+              )}
+            </div>
+            {governorReview && governorReview.review && (
+              <div style={{ fontSize: "12px", color: "#334155", lineHeight: "1.4", marginTop: "4px" }}>
+                {governorReview.review}
+              </div>
+            )}
+            {success.slack_notified && (
+              <div style={{ fontSize: "11.5px", color: "#059669" }}>
+                ✓ AI Governor approval broadcasted to Slack Bot channel.
+              </div>
             )}
           </div>
         )}
@@ -283,14 +378,103 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
           {/* Description */}
           <div>
             <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "var(--ink-soft, #334155)", marginBottom: "4px" }}>
-              Description &amp; Acceptance Criteria *
+              Description / Technical Context *
             </label>
             <textarea
-              rows={4}
+              rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: "6px", border: "1px solid var(--line-strong, #cbd5e1)", fontSize: "13px", boxSizing: "border-box", fontFamily: "inherit" }}
+              placeholder="Provide a clear description of the feature, bug, or technical context..."
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                border: "1px solid var(--line-strong, #cbd5e1)",
+                fontSize: "13px",
+                boxSizing: "border-box",
+                fontFamily: "inherit",
+              }}
             />
+          </div>
+
+          {/* Acceptance Criteria */}
+          <div style={{ background: "var(--surface-2, #f8fafc)", padding: "12px 14px", borderRadius: "8px", border: "1px solid var(--line, #e2e8f0)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+              <label style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--ink, #0f172a)", display: "flex", alignItems: "center", gap: "6px" }}>
+                <ListChecks size={16} style={{ color: "#2563eb" }} />
+                <span>Acceptance Criteria / Test Scenarios *</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleAddCriteria}
+                style={{
+                  width: "auto",
+                  minHeight: "unset",
+                  height: "26px",
+                  padding: "0 8px",
+                  fontSize: "11.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  background: "#ffffff",
+                  color: "#2563eb",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                }}
+              >
+                <Plus size={12} weight="bold" />
+                Add Criteria
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {criteriaList.map((crit, idx) => (
+                <div key={idx} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--muted, #64748b)", minWidth: "18px" }}>
+                    {idx + 1}.
+                  </span>
+                  <input
+                    type="text"
+                    value={crit}
+                    onChange={(e) => handleUpdateCriteria(idx, e.target.value)}
+                    placeholder={`e.g. Given valid input, when user submits, then system returns 200 OK`}
+                    style={{
+                      flex: 1,
+                      height: "34px",
+                      padding: "0 10px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--line-strong, #cbd5e1)",
+                      fontSize: "12.5px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCriteria(idx)}
+                    title="Remove item"
+                    style={{
+                      width: "30px",
+                      height: "30px",
+                      minHeight: "unset",
+                      padding: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--muted, #94a3b8)",
+                      cursor: "pointer",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    <Trash size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Assignee & Priority */}

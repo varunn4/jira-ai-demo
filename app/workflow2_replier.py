@@ -107,29 +107,36 @@ class Workflow2Replier:
         if not self.settings.database_url:
             raise RuntimeError("DATABASE_URL is required for workflow2")
 
+        row = None
         try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-        except ImportError as exc:
-            raise RuntimeError("The 'psycopg2-binary' package is required") from exc
-
-        with psycopg2.connect(self.settings.database_url) as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                query_input = {"slack_thread_ts": slack_thread_ts}
-                self._log_step(
-                    step="2_find_ticket_db_query",
-                    status="started",
-                    input_data=query_input,
-                )
-                cursor.execute(
+            import psycopg
+            from psycopg.rows import dict_row
+            with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                row = conn.execute(
                     """
                     SELECT id, jira_ticket_id, llm_review
                     FROM tickets
                     WHERE slack_thread_ts = %s
                     """,
                     (slack_thread_ts,),
-                )
-                row = cursor.fetchone()
+                ).fetchone()
+        except Exception:
+            try:
+                import psycopg2
+                from psycopg2.extras import RealDictCursor
+                with psycopg2.connect(self.settings.database_url) as conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                        cursor.execute(
+                            """
+                            SELECT id, jira_ticket_id, llm_review
+                            FROM tickets
+                            WHERE slack_thread_ts = %s
+                            """,
+                            (slack_thread_ts,),
+                        )
+                        row = cursor.fetchone()
+            except Exception as exc:
+                LOGGER.warning("workflow2 _find_ticket fallback: %s", exc)
 
         if not row:
             self._log_step(
@@ -154,10 +161,31 @@ class Workflow2Replier:
             raise RuntimeError("DATABASE_URL is required for workflow2")
 
         try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-        except ImportError as exc:
-            raise RuntimeError("The 'psycopg2-binary' package is required") from exc
+            import psycopg
+            from psycopg.rows import dict_row
+            use_psycopg3 = True
+        except ImportError:
+            use_psycopg3 = False
+
+        if use_psycopg3:
+            with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                conn.execute(
+                    "INSERT INTO messages (ticket_id, sender, message) VALUES (%s, 'user', %s)",
+                    (ticket_id, user_message),
+                )
+                rows = conn.execute(
+                    "SELECT sender, message FROM messages WHERE ticket_id = %s ORDER BY sent_at ASC",
+                    (ticket_id,),
+                ).fetchall()
+                chat_history = [dict(r) for r in rows]
+                messages = self._build_claude_messages(chat_history)
+                llm_reply = self._call_claude(messages)
+                conn.execute(
+                    "INSERT INTO messages (ticket_id, sender, message) VALUES (%s, 'bot', %s)",
+                    (ticket_id, llm_reply),
+                )
+                conn.commit()
+                return llm_reply
 
         with psycopg2.connect(self.settings.database_url) as conn:
             try:
