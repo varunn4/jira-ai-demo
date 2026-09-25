@@ -74,6 +74,9 @@ class Workflow1ReviewRequest(BaseModel):
     issueType: str = ""
     status: str = ""
     reporter: str = ""
+    github_repo_url: Optional[str] = ""
+    github_pat: Optional[str] = ""
+    target_repo: Optional[str] = ""
 
 
 class Workflow1ReviewResponse(BaseModel):
@@ -82,6 +85,8 @@ class Workflow1ReviewResponse(BaseModel):
     nature: str
     llm_review: str
     priority: str
+    missing_fields: List[str] = Field(default_factory=list)
+    github_repo: Optional[str] = ""
 
 
 class Workflow2ReplyRequest(BaseModel):

@@ -114,8 +114,86 @@ class JiraClient:
         return {"success": True, "transition": matched.get("name"), "issue_key": issue_key, "raw": res}
 
     def transition_to_approved(self, issue_key: str) -> dict[str, Any]:
-        target_name = self.settings.jira_approved_transition_name or "LLM APPROVED"
-        return self.transition_issue(issue_key, target_name)
+        """Try matching AI Approved, Approved, or configured approved transition name."""
+        candidates = [
+            self.settings.jira_approved_transition_name,
+            "AI Approved",
+            "AI APPROVED",
+            "Approved",
+            "APPROVED",
+            "LLM APPROVED",
+            "In Review",
+            "In Progress",
+        ]
+        transitions = self.get_transitions(issue_key)
+        for cand in candidates:
+            if not cand:
+                continue
+            cand_clean = cand.strip().lower()
+            for t in transitions:
+                t_name = str(t.get("name") or "").lower()
+                to_name = str((t.get("to") or {}).get("name") or "").lower()
+                if t_name == cand_clean or to_name == cand_clean or cand_clean in t_name or cand_clean in to_name:
+                    return self.transition_issue(issue_key, t.get("name"))
+        return self.transition_issue(issue_key, candidates[0] or "AI Approved")
+
+    def transition_to(self, issue_key: str, status_name: str) -> dict[str, Any]:
+        """Transition an issue to any lifecycle status (Created, AI Approved, In Dev, Ready for QA, In QA, Closed)."""
+        return self.transition_issue(issue_key, status_name)
+
+    def create_ticket(
+        self,
+        project_key: str,
+        summary: str,
+        description: str = "",
+        issue_type: str = "Task",
+        assignee_id: str | None = None,
+        priority_name: str | None = None,
+        github_repo_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a top-level Jira issue in Jira Cloud."""
+        if not self.is_configured():
+            return {"dry_run": True, "reason": "Jira credentials are not configured"}
+
+        full_desc = description.strip()
+        if github_repo_url and github_repo_url.strip():
+            repo_block = f"\n\n**Linked Repository:** {github_repo_url.strip()}"
+            if repo_block not in full_desc:
+                full_desc += repo_block
+
+        payload: dict[str, Any] = {
+            "fields": {
+                "project": {"key": project_key.strip().upper()},
+                "summary": summary.strip()[:250],
+                "issuetype": {"name": issue_type.strip() or "Task"},
+            }
+        }
+
+        if full_desc:
+            payload["fields"]["description"] = {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": full_desc}],
+                    }
+                ],
+            }
+
+        if assignee_id and assignee_id.strip():
+            payload["fields"]["assignee"] = {"accountId": assignee_id.strip()}
+
+        if priority_name and priority_name.strip():
+            payload["fields"]["priority"] = {"name": priority_name.strip()}
+
+        try:
+            res = self._request("POST", "/rest/api/3/issue", json=payload)
+            log.info("Created Jira ticket %s in project %s", res.get("key"), project_key)
+            return res
+        except Exception as exc:
+            log.exception("Failed to create Jira ticket in %s: %s", project_key, exc)
+            raise
 
     def create_subtask(
         self,

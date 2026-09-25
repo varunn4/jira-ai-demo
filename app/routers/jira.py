@@ -417,9 +417,99 @@ def find_testcase_regressions(
         "Test-case regression: method=%s found=%d",
         result["search_method"], len(matches),
     )
-    return TestCaseRegressionResponse(
-        query_summary=result["query_summary"],
-        total_found=result["total_found"],
-        search_method=result["search_method"],
-        matches=matches,
-    )
+@router.get("/jira/create-context")
+def get_jira_create_context(
+    _user: CurrentUser = Depends(require_tab("jira")),
+) -> dict[str, Any]:
+    """Provides connected repositories, available projects, and user list for ticket creation."""
+    from app.jira_client import JiraClient
+    from app.rca import repos as rca_repos
+
+    jc = JiraClient(settings)
+    connected_repos = rca_repos.list_repos(settings)
+
+    projects: list[dict[str, Any]] = []
+    users: list[dict[str, Any]] = []
+
+    if jc.is_configured():
+        try:
+            p_data = jc._request("GET", "/rest/api/3/project")
+            if isinstance(p_data, list):
+                projects = [{"key": p.get("key"), "name": p.get("name")} for p in p_data]
+        except Exception as exc:
+            log.warning("Could not list Jira projects: %s", exc)
+
+        try:
+            u_data = jc._request("GET", "/rest/api/3/users/search", params={"maxResults": 50})
+            if isinstance(u_data, list):
+                users = [
+                    {"accountId": u.get("accountId"), "displayName": u.get("displayName"), "email": u.get("emailAddress")}
+                    for u in u_data
+                    if u.get("accountType") == "atlassian" and u.get("active")
+                ]
+        except Exception as exc:
+            log.warning("Could not list Jira users: %s", exc)
+
+    return {
+        "connected_repositories": connected_repos,
+        "projects": projects or [{"key": "SCRUM", "name": "Scrum Project"}],
+        "users": users,
+        "jira_configured": jc.is_configured(),
+    }
+
+
+@router.post("/jira/create-ticket")
+def create_jira_ticket(
+    payload: dict[str, Any],
+    _user: CurrentUser = Depends(require_tab("jira")),
+) -> dict[str, Any]:
+    """Create a new Jira ticket with mandatory field checks and linked repository."""
+    from app.jira_client import JiraClient
+
+    project_key = str(payload.get("project_key") or "SCRUM").strip().upper()
+    summary = str(payload.get("summary") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    issue_type = str(payload.get("issue_type") or "Task").strip()
+    assignee_id = str(payload.get("assignee_id") or "").strip() or None
+    priority_name = str(payload.get("priority") or "Medium").strip()
+    github_repo_url = str(payload.get("github_repo_url") or "").strip() or None
+    pat = str(payload.get("github_pat") or "").strip() or None
+
+    if not summary:
+        raise HTTPException(status_code=400, detail="Summary is required")
+
+    jc = JiraClient(settings)
+    if not jc.is_configured():
+        raise HTTPException(status_code=400, detail="Jira Cloud is not configured in Settings")
+
+    try:
+        created = jc.create_ticket(
+            project_key=project_key,
+            summary=summary,
+            description=description,
+            issue_type=issue_type,
+            assignee_id=assignee_id,
+            priority_name=priority_name,
+            github_repo_url=github_repo_url,
+        )
+        issue_key = created.get("key")
+
+        # Auto-bind repository if specified
+        if github_repo_url and issue_key:
+            try:
+                from app.workflow1_reviewer import Workflow1Reviewer
+                reviewer = Workflow1Reviewer(settings=settings, prompt_store=prompt_store)
+                reviewer._ensure_repository_connected(github_repo_url, pat)
+            except Exception as exc:
+                log.warning("Repo auto-clone skipped for %s: %s", github_repo_url, exc)
+
+        return {
+            "status": "success",
+            "key": issue_key,
+            "id": created.get("id"),
+            "url": f"{jc.base_url}/browse/{issue_key}" if issue_key else "",
+            "summary": summary,
+        }
+    except Exception as exc:
+        log.exception("Ticket creation failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to create Jira ticket: {str(exc)}")

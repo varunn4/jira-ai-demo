@@ -49,40 +49,69 @@ class Workflow1Reviewer:
             LOGGER.exception("workflow1 step failed: validate_input")
             raise
 
-        try:
-            LOGGER.info("workflow1 step started: build_llm_prompt prompt_name=workflow1_prompt")
-            prompt = self._build_prompt(payload)
-            LOGGER.info(
-                "workflow1 step completed: build_llm_prompt prompt_length=%s prompt=%s",
-                len(prompt),
-                prompt,
-            )
-        except Exception:
-            LOGGER.exception("workflow1 step failed: build_llm_prompt")
-            raise
+        # ── Mandatory Field & Repository Extraction ──
+        repo_url, repo_pat = self._extract_repo_url(payload)
+        payload["github_repo"] = repo_url or "None provided"
 
-        try:
-            LOGGER.info("workflow1 step started: call_claude_api model=claude-opus-4-5")
-            raw_llm_output = self._call_claude(prompt)
-            LOGGER.info(
-                "workflow1 step completed: call_claude_api raw_output_length=%s raw_output=%s",
-                len(raw_llm_output),
-                raw_llm_output,
-            )
-        except Exception:
-            LOGGER.exception("workflow1 step failed: call_claude_api")
-            raise
+        missing_fields: list[str] = []
 
-        try:
-            LOGGER.info("workflow1 step started: parse_llm_output")
-            model_output = self._parse_llm_output(raw_llm_output)
-            LOGGER.info(
-                "workflow1 step completed: parse_llm_output parsed_output=%s",
-                self._to_log_json(model_output),
+        # 1. Assignee Validation
+        assignee_val = str(request.assignee or "").strip()
+        if not assignee_val or assignee_val.lower() in {"unassigned", "none", "null", ""}:
+            missing_fields.append("Assignee is required (currently Unassigned). Please assign a developer in Jira.")
+
+        # 2. Priority Validation
+        priority_val = str(request.priority or "").strip()
+        if not priority_val or priority_val.lower() in {"none", "null", ""}:
+            missing_fields.append("Priority is required (P0 - P4). Please set the ticket priority in Jira.")
+
+        # 3. GitHub Repository Validation
+        if not repo_url:
+            missing_fields.append("GitHub Repository URL is required. Please link the GitHub repository in Jira description.")
+        else:
+            conn_res = self._ensure_repository_connected(repo_url, repo_pat)
+            if not conn_res.get("connected"):
+                LOGGER.info("Repository '%s' status: %s", repo_url, conn_res.get("error"))
+
+        # If any hard mandatory field is missing, reject immediately with structured guidance
+        if missing_fields:
+            missing_text = "\n".join(f"• {m}" for m in missing_fields)
+            review_msg = (
+                f"⚠️ *AI Governor Quality Check: REJECTED (Unsatisfied)*\n\n"
+                f"The ticket `{request.issueKey}` cannot be approved because mandatory fields are missing:\n\n"
+                f"{missing_text}\n\n"
+                f"👉 *Action Required:* Please update these fields directly in Jira to proceed to **AI Approved**."
             )
-        except Exception:
-            LOGGER.exception("workflow1 step failed: parse_llm_output")
-            raise
+            model_output = {
+                "nature": "unsatisfied",
+                "llm_review": review_msg,
+                "priority": priority_val if priority_val in VALID_PRIORITIES else "P3",
+            }
+        else:
+            # All mandatory fields present -> Call LLM for Acceptance Criteria & Quality Review
+            try:
+                LOGGER.info("workflow1 step started: build_llm_prompt prompt_name=workflow1_prompt")
+                prompt = self._build_prompt(payload)
+                LOGGER.info("workflow1 step completed: build_llm_prompt length=%s", len(prompt))
+            except Exception:
+                LOGGER.exception("workflow1 step failed: build_llm_prompt")
+                raise
+
+            try:
+                LOGGER.info("workflow1 step started: call_claude_api model=claude-opus-4-5")
+                raw_llm_output = self._call_claude(prompt)
+                LOGGER.info("workflow1 step completed: call_claude_api length=%s", len(raw_llm_output))
+            except Exception:
+                LOGGER.exception("workflow1 step failed: call_claude_api")
+                raise
+
+            try:
+                LOGGER.info("workflow1 step started: parse_llm_output")
+                model_output = self._parse_llm_output(raw_llm_output)
+                LOGGER.info("workflow1 step completed: parse_llm_output nature=%s", model_output.get("nature"))
+            except Exception:
+                LOGGER.exception("workflow1 step failed: parse_llm_output")
+                raise
 
         try:
             LOGGER.info("workflow1 step started: find_slack_channel_ids")
@@ -144,12 +173,22 @@ class Workflow1Reviewer:
                 if jc.is_configured():
                     jc.add_comment(
                         request.issueKey,
-                        f"🤖 *AI Governor Validation*: **APPROVED**\n\n{model_output['llm_review']}",
+                        f"🤖 *AI Governor Validation*: **AI APPROVED**\n\n{model_output['llm_review']}",
                     )
                     trans_res = jc.transition_to_approved(request.issueKey)
                     LOGGER.info("workflow1 auto-transition for %s: %s", request.issueKey, trans_res)
             except Exception as exc:
                 LOGGER.warning("workflow1 auto-transition skipped/failed for %s: %s", request.issueKey, exc)
+
+        # Dispatch Slack Governor notification directly if configured
+        target_channel = assignee_match.channel_id or reporter_match.channel_id
+        if target_channel and self.settings.slack_bot_token:
+            try:
+                from app.slack_client import SlackClient
+                sc = SlackClient(self.settings)
+                sc.probe_channel(channel_id=target_channel, text=model_output["llm_review"])
+            except Exception as exc:
+                LOGGER.warning("workflow1 direct Slack notification skipped: %s", exc)
 
         response = {
             "assignee_channel_id": assignee_match.channel_id,
@@ -157,9 +196,71 @@ class Workflow1Reviewer:
             "nature": model_output["nature"],
             "llm_review": model_output["llm_review"],
             "priority": model_output["priority"],
+            "missing_fields": missing_fields,
+            "github_repo": repo_url or "",
         }
         LOGGER.info("workflow1 completed with response: %s", self._to_log_json(response))
         return response
+
+    def _extract_repo_url(self, payload: dict[str, Any]) -> tuple[str | None, str | None]:
+        """Extract GitHub Repo URL and optional PAT from payload or description text."""
+        explicit_url = payload.get("github_repo_url") or payload.get("target_repo") or payload.get("repo")
+        explicit_pat = payload.get("github_pat") or payload.get("pat")
+
+        text = f"{payload.get('summary', '')} {payload.get('description', '')}"
+
+        if not explicit_url:
+            match = re.search(r"https?://github\.com/([\w\.\-]+)/([\w\.\-]+?)(?:\.git|/|\s|$)", text, re.IGNORECASE)
+            if match:
+                explicit_url = f"https://github.com/{match.group(1)}/{match.group(2)}"
+            else:
+                repo_match = re.search(r"(?:repo|repository):\s*([a-zA-Z0-9_\-\./]+)", text, re.IGNORECASE)
+                if repo_match:
+                    explicit_url = repo_match.group(1).strip()
+
+        if not explicit_pat:
+            pat_match = re.search(r"(?:PAT|token):\s*([a-zA-Z0-9_\-]{15,})", text, re.IGNORECASE)
+            if pat_match:
+                explicit_pat = pat_match.group(1).strip()
+
+        return explicit_url, explicit_pat
+
+    def _ensure_repository_connected(self, repo_url: str, pat: str | None = None) -> dict[str, Any]:
+        """Checks if repo exists in workspace, or auto-clones it if new."""
+        try:
+            from app.rca import repos as rca_repos
+            existing_repos = rca_repos.list_repos(self.settings)
+        except Exception:
+            existing_repos = []
+
+        repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
+
+        if repo_name in existing_repos:
+            LOGGER.info("Repository '%s' is already connected in workspace.", repo_name)
+            return {"connected": True, "name": repo_name, "status": "existing"}
+
+        # Try auto-cloning if full URL is provided
+        if repo_url.startswith("http://") or repo_url.startswith("https://") or "github.com" in repo_url:
+            try:
+                import subprocess
+                from pathlib import Path
+                clone_target = Path("workspace/repos") / repo_name
+                clone_target.parent.mkdir(parents=True, exist_ok=True)
+                if not clone_target.exists():
+                    auth_url = repo_url
+                    token = pat or self.settings.github_token
+                    if token and "github.com" in repo_url and not ("@" in repo_url):
+                        auth_url = repo_url.replace("https://github.com/", f"https://x-access-token:{token}@github.com/")
+                    LOGGER.info("Cloning new repository '%s' into workspace...", repo_name)
+                    subprocess.run(["git", "clone", "--depth", "1", auth_url, str(clone_target)], check=True, capture_output=True, timeout=60)
+                    LOGGER.info("Successfully cloned '%s' into workspace.", repo_name)
+                return {"connected": True, "name": repo_name, "status": "cloned"}
+            except Exception as exc:
+                LOGGER.warning("Auto-clone for '%s' failed: %s", repo_url, exc)
+                return {"connected": False, "name": repo_name, "error": str(exc)}
+
+        return {"connected": False, "name": repo_name, "error": "Repository not found in workspace"}
+
 
     def _validate_input(self, request: Workflow1ReviewRequest) -> None:
         if not request.issueKey.strip():

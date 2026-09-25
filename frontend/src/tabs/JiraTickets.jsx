@@ -15,7 +15,9 @@ import {
   CaretUp,
   CaretDown,
   MagnifyingGlass,
+  Plus,
 } from "@phosphor-icons/react";
+import CreateTicketModal from "../components/CreateTicketModal";
 
 const MATCH_FILTERS = [
   { value: "all", label: "All Tickets", icon: null },
@@ -46,6 +48,7 @@ export default function JiraTickets() {
   const [pipelineLimit, setPipelineLimit] = useState("5");
   const [downloading, setDownloading] = useState(false);
   const [info, setInfo] = useState({ msg: "", error: false });
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   async function loadData(forceRefresh = false) {
     setLoading(true);
@@ -335,6 +338,32 @@ export default function JiraTickets() {
             Refresh
           </button>
 
+          {/* Create Jira Ticket Button */}
+          <button
+            type="button"
+            onClick={() => setCreateModalOpen(true)}
+            style={{
+              width: "auto",
+              minHeight: "unset",
+              height: 34,
+              padding: "0 14px",
+              fontSize: 12.5,
+              fontWeight: "600",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "var(--accent-grad-strong, #2563eb)",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: 6,
+              cursor: "pointer",
+              boxShadow: "0 1px 2px rgba(37,99,235,0.2)",
+            }}
+          >
+            <Plus size={15} weight="bold" />
+            Create Ticket
+          </button>
+
           {/* Pipeline Limit Dropdown */}
           <select
             value={pipelineLimit}
@@ -457,6 +486,12 @@ export default function JiraTickets() {
       <div style={{ marginTop: 12, fontSize: 12, color: "var(--muted)" }}>
         Showing {filteredTickets.length} of {totalScanned} tickets in cache{excludedText}
       </div>
+
+      <CreateTicketModal
+        isOpen={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        onTicketCreated={() => loadData(true)}
+      />
     </div>
   );
 }
@@ -490,14 +525,60 @@ function CombinedTicketRow({ t }) {
   const matches = t.matches || [];
   const [open, setOpen] = useState(false);
 
-  const statusLower = (t.status || "").toLowerCase();
-  let statusBadgeClass = "badge";
-  if (statusLower.includes("done") || statusLower.includes("closed") || statusLower.includes("resolved")) {
-    statusBadgeClass = "badge ok";
-  } else if (statusLower.includes("progress") || statusLower.includes("review") || statusLower.includes("active")) {
-    statusBadgeClass = "badge run";
-  } else if (statusLower.includes("block") || statusLower.includes("cancel")) {
-    statusBadgeClass = "badge err";
+  const statusLower = (t.status || "").toLowerCase().trim();
+  let statusBadgeStyle = {
+    fontSize: 11,
+    padding: "2px 8px",
+    borderRadius: 4,
+    fontWeight: 700,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+  };
+
+  if (statusLower === "ai approved" || statusLower.includes("approved")) {
+    statusBadgeStyle = {
+      ...statusBadgeStyle,
+      background: "rgba(16, 185, 129, 0.12)",
+      color: "#047857",
+      border: "1px solid rgba(16, 185, 129, 0.3)",
+    };
+  } else if (statusLower === "in dev" || statusLower.includes("progress") || statusLower.includes("dev")) {
+    statusBadgeStyle = {
+      ...statusBadgeStyle,
+      background: "rgba(59, 130, 246, 0.12)",
+      color: "#1d4ed8",
+      border: "1px solid rgba(59, 130, 246, 0.3)",
+    };
+  } else if (statusLower === "ready for qa") {
+    statusBadgeStyle = {
+      ...statusBadgeStyle,
+      background: "rgba(245, 158, 11, 0.12)",
+      color: "#b45309",
+      border: "1px solid rgba(245, 158, 11, 0.3)",
+    };
+  } else if (statusLower === "in qa" || statusLower.includes("qa") || statusLower.includes("review")) {
+    statusBadgeStyle = {
+      ...statusBadgeStyle,
+      background: "rgba(139, 92, 246, 0.12)",
+      color: "#6d28d9",
+      border: "1px solid rgba(139, 92, 246, 0.3)",
+    };
+  } else if (statusLower === "closed" || statusLower.includes("done") || statusLower.includes("resolved")) {
+    statusBadgeStyle = {
+      ...statusBadgeStyle,
+      background: "rgba(100, 116, 139, 0.12)",
+      color: "#334155",
+      border: "1px solid rgba(100, 116, 139, 0.3)",
+    };
+  } else {
+    // Created / default
+    statusBadgeStyle = {
+      ...statusBadgeStyle,
+      background: "var(--surface-2, #f1f5f9)",
+      color: "var(--ink-soft, #475569)",
+      border: "1px solid var(--line, #cbd5e1)",
+    };
   }
 
   return (
@@ -531,8 +612,8 @@ function CombinedTicketRow({ t }) {
           {t.summary || "—"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-          <span className={statusBadgeClass} style={{ fontSize: 10.5, padding: "1px 7px", fontWeight: 700 }}>
-            {t.status || "—"}
+          <span style={statusBadgeStyle}>
+            {t.status || "Created"}
           </span>
           <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 500 }}>
             • {t.issue_type || "Task"}
