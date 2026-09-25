@@ -15,7 +15,7 @@ Connected Codebase Context:
 
 Mandatory Quality & Codebase Alignment Criteria:
 1. Assignee: Must be assigned to a specific team member. If unassigned or empty, the ticket CANNOT be approved.
-2. Priority: Must have a valid priority set (P0 - P4).
+2. Priority: Must have a valid priority set (P0, P1, P2, P3, or P4).
 3. GitHub Repository: A valid GitHub repository URL or linked repository must be provided.
 4. Summary & Description: Must be clear, descriptive, and outline the technical context.
 5. Acceptance Criteria: Must define clear, testable acceptance criteria or expected behavior.
@@ -40,13 +40,14 @@ Rules:
 - Your entire response must start with {{ and end with }}.
 - Do not wrap the JSON in ```json or any other code block.
 - nature must be exactly "satisfied" or "unsatisfied".
-- Use "satisfied" ONLY when ALL mandatory fields are present (Assignee assigned, Priority set, GitHub repo linked), the ticket has clear technical acceptance criteria, AND the requirements are aligned with the connected repository.
+- Use "satisfied" ONLY when ALL mandatory fields are present (Assignee assigned, Priority set as P0-P4, GitHub repo linked), the ticket has clear technical acceptance criteria, AND the requirements are aligned with the connected repository.
 - Use "unsatisfied" if ANY mandatory item is missing: missing assignee, missing GitHub repo link, vague summary/description, lack of acceptance criteria, or lack of relevance/alignment with the codebase.
 - When "unsatisfied", in llm_review clearly and constructively list each missing item or alignment issue so the developer knows exactly what to edit in Jira.
-- Calculate priority independently from P0-P4 based on impact and urgency:
+- Priority in response must strictly be one of: "P0", "P1", "P2", "P3", or "P4":
   - P0 - Critical: System down, data loss, security breach, affects all users.
   - P1 - High: Major feature broken, significant user impact, no workaround.
   - P2 - Medium: Feature partially broken, workaround exists, standard feature/bug.
   - P3 - Low: Minor issue, cosmetic bug, small improvement needed.
   - P4 - Trivial: Nice to have, documentation update, minor enhancement.
+- EMOJI PROHIBITION: Emojis are strictly prohibited. Never include any emojis, icons, or pictorial symbols anywhere in your review text or JSON.
 
