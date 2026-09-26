@@ -84,6 +84,7 @@ ring_images/
 app/static/rings/generated/
 
 # ── Local Test & Verification Scripts ─────────────────────────────────────────
+scripts/generate_architecture_pdf.py
 scripts/generate_live_testcases.py
 scripts/generate_walkthrough_pdf.py
 scripts/*walkthrough*

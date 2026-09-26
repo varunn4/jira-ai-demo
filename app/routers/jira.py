@@ -474,10 +474,33 @@ def create_jira_ticket(
     summary = str(payload.get("summary") or "").strip()
     description = str(payload.get("description") or "").strip()
     issue_type = str(payload.get("issue_type") or "Task").strip()
-    assignee_id = str(payload.get("assignee_id") or "").strip() or None
-    priority_name = str(payload.get("priority") or "Medium").strip()
+    # Map priority consistently: P0-P4 for AI Governor, Jira standard names for Jira API
+    raw_priority = str(payload.get("priority") or "P2").strip().upper()
+    priority_p_map = {
+        "P0": "P0", "HIGHEST": "P0", "CRITICAL": "P0",
+        "P1": "P1", "HIGH": "P1",
+        "P2": "P2", "MEDIUM": "P2",
+        "P3": "P3", "LOW": "P3",
+        "P4": "P4", "LOWEST": "P4", "TRIVIAL": "P4",
+    }
+    priority_p = priority_p_map.get(raw_priority, "P2")
+    jira_priority_map = {
+        "P0": "Highest",
+        "P1": "High",
+        "P2": "Medium",
+        "P3": "Low",
+        "P4": "Lowest",
+    }
+    jira_priority = jira_priority_map.get(priority_p, "Medium")
+
     github_repo_url = str(payload.get("github_repo_url") or "").strip() or None
     pat = str(payload.get("github_pat") or "").strip() or None
+
+    # Format connected repository cleanly for LLM
+    if github_repo_url and not (github_repo_url.startswith("http://") or github_repo_url.startswith("https://") or "github.com" in github_repo_url):
+        repo_ref_for_eval = f"Connected Repository: {github_repo_url}"
+    else:
+        repo_ref_for_eval = github_repo_url or "None provided"
 
     # 1. Basic Field Validation
     if not summary or len(summary) < 5:
@@ -513,12 +536,12 @@ def create_jira_ticket(
         "summary": summary,
         "description": description,
         "assignee": assignee_id or "Unassigned",
-        "priority": priority_name,
+        "priority": priority_p,
         "issueType": issue_type,
         "status": "Draft",
         "reporter": _user.email or "AI Governor",
         "dueDate": "",
-        "github_repo": github_repo_url or "None provided",
+        "github_repo": repo_ref_for_eval,
         "codebase_context": codebase_ctx,
     }
 
@@ -531,7 +554,7 @@ def create_jira_ticket(
         model_output = {
             "nature": "satisfied",
             "llm_review": "AI Governor auto-approved with baseline requirements.",
-            "priority": "P2",
+            "priority": priority_p,
         }
 
     # 4. If AI Governor Rejects (Unsatisfied context / codebase misalignment):
@@ -548,11 +571,11 @@ def create_jira_ticket(
             )
             if target_channel:
                 slack_msg = (
-                    f"⚠️ *AI Governor Ticket Rejection Alert*\n"
-                    f"• *Project:* `{project_key}`\n"
-                    f"• *Summary:* *{summary}*\n"
-                    f"• *Repository:* `{github_repo_url or 'None linked'}`\n"
-                    f"• *Status:* ❌ *REJECTED (Unsatisfied / Insufficient Codebase Context)*\n\n"
+                    f"*AI Governor Ticket Rejection Alert*\n"
+                    f"- Project: `{project_key}`\n"
+                    f"- Summary: *{summary}*\n"
+                    f"- Repository: `{github_repo_url or 'None linked'}`\n"
+                    f"- Status: *REJECTED (Unsatisfied / Insufficient Codebase Context)*\n\n"
                     f"{model_output['llm_review']}"
                 )
                 slack_client.post_message(channel_id=target_channel, text=slack_msg)
@@ -563,7 +586,7 @@ def create_jira_ticket(
             "status": "rejected",
             "nature": "unsatisfied",
             "review": model_output["llm_review"],
-            "priority": model_output.get("priority", "P3"),
+            "priority": model_output.get("priority", priority_p),
             "summary": summary,
         }
 
@@ -582,7 +605,7 @@ def create_jira_ticket(
             description=description,
             issue_type=issue_type,
             assignee_id=assignee_id,
-            priority_name=priority_name,
+            priority_name=jira_priority,
             github_repo_url=github_repo_url,
         )
         issue_key = created.get("key")
@@ -595,7 +618,7 @@ def create_jira_ticket(
         try:
             jc.add_comment(
                 issue_key,
-                f"🤖 *AI Governor Validation*: **AI APPROVED**\n\n{model_output['llm_review']}",
+                f"[AI Governor Validation]: AI APPROVED\n\n{model_output['llm_review']}",
             )
             jc.transition_to_approved(issue_key)
         except Exception as trans_exc:
@@ -630,7 +653,7 @@ def create_jira_ticket(
                             description,
                             "AI Approved",
                             issue_type,
-                            priority_name,
+                            jira_priority,
                             datetime.now(timezone.utc),
                             datetime.now(timezone.utc),
                             psycopg.types.json.Jsonb(created),
@@ -653,13 +676,13 @@ def create_jira_ticket(
             )
             if target_channel:
                 msg = (
-                    f"🎯 *New Jira Engineering Ticket Created & AI Approved*\n"
-                    f"• *Ticket:* <{ticket_url}|{issue_key}> ({issue_type})\n"
-                    f"• *Project:* `{project_key}`\n"
-                    f"• *Summary:* *{summary}*\n"
-                    f"• *Priority:* `{model_output.get('priority', priority_name)}`\n"
-                    f"• *Repository:* `{github_repo_url or 'None linked'}`\n"
-                    f"• *AI Governor Status:* ✅ **AI APPROVED**\n\n"
+                    f"*New Jira Engineering Ticket Created & AI Approved*\n"
+                    f"- Ticket: <{ticket_url}|{issue_key}> ({issue_type})\n"
+                    f"- Project: `{project_key}`\n"
+                    f"- Summary: *{summary}*\n"
+                    f"- Priority: `{model_output.get('priority', priority_p)}`\n"
+                    f"- Repository: `{github_repo_url or 'None linked'}`\n"
+                    f"- Status: *AI APPROVED*\n\n"
                     f"{model_output['llm_review']}"
                 )
                 res = slack_client.post_message(channel_id=target_channel, text=msg)

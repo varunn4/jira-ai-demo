@@ -82,12 +82,12 @@ class Workflow1Reviewer:
 
         # If any hard mandatory field is missing, reject immediately with structured guidance
         if missing_fields:
-            missing_text = "\n".join(f"• {m}" for m in missing_fields)
+            missing_text = "\n".join(f"- {m}" for m in missing_fields)
             review_msg = (
-                f"⚠️ *AI Governor Quality Check: REJECTED (Unsatisfied)*\n\n"
+                f"[AI Governor Quality Check: REJECTED (Unsatisfied)]\n\n"
                 f"The ticket `{request.issueKey}` cannot be approved because mandatory fields are missing:\n\n"
                 f"{missing_text}\n\n"
-                f"👉 *Action Required:* Please update these fields directly in Jira to proceed to **AI Approved**."
+                f"Action Required: Please update these fields directly in Jira to proceed to AI Approved status."
             )
             model_output = {
                 "nature": "unsatisfied",
@@ -180,14 +180,14 @@ class Workflow1Reviewer:
                 if model_output["nature"] == "satisfied":
                     jc.add_comment(
                         request.issueKey,
-                        f"🤖 *AI Governor Validation*: **AI APPROVED**\n\n{model_output['llm_review']}",
+                        f"[AI Governor Validation]: AI APPROVED\n\n{model_output['llm_review']}",
                     )
                     trans_res = jc.transition_to_approved(request.issueKey)
                     LOGGER.info("workflow1 auto-transition for %s: %s", request.issueKey, trans_res)
                 else:
                     jc.add_comment(
                         request.issueKey,
-                        f"⚠️ *AI Governor Validation*: **UNSATISFIED / REJECTED**\n\n{model_output['llm_review']}",
+                        f"[AI Governor Validation]: UNSATISFIED / REJECTED\n\n{model_output['llm_review']}",
                     )
         except Exception as exc:
             LOGGER.warning("workflow1 Jira comment/transition skipped/failed for %s: %s", request.issueKey, exc)
@@ -208,12 +208,12 @@ class Workflow1Reviewer:
                 or db_conf.get("slack_default_channel_id")
             )
             if target_channel:
-                status_emoji = "✅ *AI APPROVED*" if model_output["nature"] == "satisfied" else "⚠️ *REJECTED (Unsatisfied)*"
+                status_text = "AI APPROVED" if model_output["nature"] == "satisfied" else "REJECTED (Unsatisfied)"
                 slack_msg = (
-                    f"🤖 *AI Governor Ticket Review: `{request.issueKey}`*\n"
-                    f"• *Status:* {status_emoji}\n"
-                    f"• *Summary:* *{request.summary}*\n"
-                    f"• *Assessed Priority:* `{model_output['priority']}`\n\n"
+                    f"*AI Governor Ticket Review: `{request.issueKey}`*\n"
+                    f"- Status: *{status_text}*\n"
+                    f"- Summary: *{request.summary}*\n"
+                    f"- Assessed Priority: `{model_output['priority']}`\n\n"
                     f"{model_output['llm_review']}"
                 )
                 sc.post_message(channel_id=target_channel, text=slack_msg)
