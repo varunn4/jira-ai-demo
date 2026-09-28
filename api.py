@@ -1,5 +1,6 @@
 """FastAPI entry point for Jira ticket analysis, workflows, and administration."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,6 +37,29 @@ logging.basicConfig(
 )
 
 log = logging.getLogger(__name__)
+
+
+async def _jira_sync_loop() -> None:
+    """Keep jira_ticket_cache in step with Jira so tickets created there show up."""
+    from app.governor_auto import run_pending_reviews
+    from app.jira_fetcher import sync_recent_tickets
+    from app.prompt_store import PromptStore
+
+    prompt_store = PromptStore(settings.prompt_dir)
+
+    while True:
+        interval = settings.jira_sync_interval_seconds
+        if interval <= 0:
+            return
+        try:
+            await asyncio.to_thread(sync_recent_tickets, max(10, interval // 60 * 2))
+        except Exception:
+            log.exception("Background Jira sync failed")
+        try:
+            await asyncio.to_thread(run_pending_reviews, settings, prompt_store)
+        except Exception:
+            log.exception("Background governor review failed")
+        await asyncio.sleep(interval)
 
 
 @asynccontextmanager
@@ -77,9 +101,12 @@ async def lifespan(_app: FastAPI):
     except Exception:
         log.exception("RCA run store schema initialization failed")
 
+    sync_task = asyncio.create_task(_jira_sync_loop())
+
     try:
         yield
     finally:
+        sync_task.cancel()
         shutdown_repo_tree()
 
 
@@ -161,7 +188,7 @@ def spa_graph_admin() -> Response:
 _API_PATH_PREFIXES = (
     "api/", "graph-admin", "auth/", "static/", "assets/", "analyze-ticket",
     "workflow", "scan/", "repomix/", "testcases/", "jobs", "repo-tree",
-    "prompts", "chat", "health", "openapi.json", "rca/",
+    "prompts", "chat", "health", "openapi.json", "rca/", "jira/",
     # "ring-studio", "zoho/",  # (Commented out)
 )
 

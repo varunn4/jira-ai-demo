@@ -17,12 +17,18 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from tree_sitter_language_pack import get_parser
+log = logging.getLogger(__name__)
+
+try:
+    from tree_sitter_language_pack import get_parser
+except Exception as _ts_err:
+    log.warning("tree_sitter_language_pack import warning: %s", _ts_err)
+
+    def get_parser(lang: str):
+        raise RuntimeError(f"tree_sitter_language_pack unavailable: {_ts_err}")
 
 from .config import GraphBuildConfig, repo_local_path
 from .writer import Neo4jWriter
-
-log = logging.getLogger(__name__)
 
 LANG_BY_EXT = {
     ".py": "python",

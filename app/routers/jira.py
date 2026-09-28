@@ -474,6 +474,7 @@ def create_jira_ticket(
     summary = str(payload.get("summary") or "").strip()
     description = str(payload.get("description") or "").strip()
     issue_type = str(payload.get("issue_type") or "Task").strip()
+    assignee_id = str(payload.get("assignee_id") or "").strip() or None
     # Map priority consistently: P0-P4 for AI Governor, Jira standard names for Jira API
     raw_priority = str(payload.get("priority") or "P2").strip().upper()
     priority_p_map = {
@@ -615,12 +616,17 @@ def create_jira_ticket(
         ticket_url = f"{jc.base_url}/browse/{issue_key}" if issue_key else ""
 
         # Transition Jira issue to AI Approved and add approval comment
+        cache_status = "To Do"
         try:
             jc.add_comment(
                 issue_key,
                 f"[AI Governor Validation]: AI APPROVED\n\n{model_output['llm_review']}",
             )
-            jc.transition_to_approved(issue_key)
+            trans_res = jc.transition_to_approved(issue_key)
+            if trans_res.get("success"):
+                cache_status = trans_res.get("to_status") or cache_status
+            else:
+                log.warning("Approved transition not applied for %s: %s", issue_key, trans_res.get("reason"))
         except Exception as trans_exc:
             log.warning("Jira comment/transition skipped for %s: %s", issue_key, trans_exc)
 
@@ -651,7 +657,7 @@ def create_jira_ticket(
                             project_key,
                             summary,
                             description,
-                            "AI Approved",
+                            cache_status,
                             issue_type,
                             jira_priority,
                             datetime.now(timezone.utc),

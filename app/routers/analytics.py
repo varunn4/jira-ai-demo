@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Analytics, Utilization, Channel Health, and RFT router."""
 
 import logging

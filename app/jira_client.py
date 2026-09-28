@@ -136,19 +136,24 @@ class JiraClient:
             f"/rest/api/3/issue/{issue_key}/transitions",
             json={"transition": {"id": matched["id"]}},
         )
-        return {"success": True, "transition": matched.get("name"), "issue_key": issue_key, "raw": res}
+        return {
+            "success": True,
+            "transition": matched.get("name"),
+            "to_status": (matched.get("to") or {}).get("name"),
+            "issue_key": issue_key,
+            "raw": res,
+        }
 
     def transition_to_approved(self, issue_key: str) -> dict[str, Any]:
         """Try matching AI Approved, Approved, or configured approved transition name."""
         candidates = [
             self.settings.jira_approved_transition_name,
+            "Governor Approved",
             "AI Approved",
             "AI APPROVED",
             "Approved",
             "APPROVED",
             "LLM APPROVED",
-            "In Review",
-            "In Progress",
         ]
         transitions = self.get_transitions(issue_key)
         for cand in candidates:

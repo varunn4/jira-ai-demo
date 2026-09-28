@@ -24,6 +24,7 @@ export default defineConfig({
       "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/auth": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/graph-admin": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/jira": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/analyze-ticket": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/rca": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/ring-studio": { target: "http://127.0.0.1:8000", changeOrigin: true },

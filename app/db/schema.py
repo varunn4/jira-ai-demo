@@ -317,6 +317,105 @@ CREATE TABLE IF NOT EXISTS app_user_settings (
 );
 CREATE INDEX IF NOT EXISTS idx_app_user_settings_user ON app_user_settings (user_id);
 CREATE INDEX IF NOT EXISTS idx_app_user_settings_email ON app_user_settings (LOWER(user_email));
+
+-- 23. Tickets (Workflow Central Tracking)
+CREATE TABLE IF NOT EXISTS tickets (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    jira_ticket_id  TEXT UNIQUE NOT NULL,
+    email           TEXT,
+    assigned_user_id TEXT,
+    slack_channel_id TEXT,
+    slack_thread_ts  TEXT,
+    llm_review      TEXT,
+    status          TEXT DEFAULT 'open',
+    jira_payload    JSONB,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_jira_id ON tickets (jira_ticket_id);
+
+-- 24. Messages (Conversation History per Ticket)
+CREATE TABLE IF NOT EXISTS messages (
+    id         BIGSERIAL PRIMARY KEY,
+    ticket_id  UUID REFERENCES tickets(id) ON DELETE CASCADE,
+    sender     TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 25. Channel ID Table (Slack User & Channel Mapping)
+CREATE TABLE IF NOT EXISTS channelid_table (
+    slack_user_name TEXT PRIMARY KEY,
+    email_id        TEXT,
+    channel_id      TEXT NOT NULL,
+    role            TEXT,
+    jira_account_id TEXT,
+    display_name    TEXT
+);
+
+-- 26. SLA Tracking
+CREATE TABLE IF NOT EXISTS sla_tracking (
+    id                BIGSERIAL PRIMARY KEY,
+    ticket_id         UUID REFERENCES tickets(id) ON DELETE CASCADE,
+    jira_ticket_id    TEXT UNIQUE NOT NULL,
+    priority          TEXT,
+    assignee_slack_id TEXT,
+    sla_start_time    TIMESTAMPTZ,
+    sla_deadline      TIMESTAMPTZ,
+    sla_window_hours  INTEGER,
+    alert_75_sent     BOOLEAN DEFAULT FALSE,
+    alert_50_sent     BOOLEAN DEFAULT FALSE,
+    alert_25_sent     BOOLEAN DEFAULT FALSE,
+    alert_0_sent      BOOLEAN DEFAULT FALSE,
+    is_resolved       BOOLEAN DEFAULT FALSE
+);
+
+-- 27. Due Date Tracking
+CREATE TABLE IF NOT EXISTS due_date_tracking (
+    id                  BIGSERIAL PRIMARY KEY,
+    ticket_id           UUID REFERENCES tickets(id) ON DELETE CASCADE,
+    jira_ticket_id      TEXT UNIQUE NOT NULL,
+    priority            TEXT,
+    assignee_slack_id   TEXT,
+    due_date            DATE,
+    tracking_start_date DATE,
+    total_working_days  INTEGER,
+    alert_75_sent       BOOLEAN DEFAULT FALSE,
+    alert_50_sent       BOOLEAN DEFAULT FALSE,
+    alert_25_sent       BOOLEAN DEFAULT FALSE,
+    alert_0_sent        BOOLEAN DEFAULT FALSE,
+    exceeded_alert_sent_at TIMESTAMPTZ,
+    is_completed        BOOLEAN DEFAULT FALSE,
+    dev_due_date        DATE,
+    qa_due_date         DATE,
+    live_due_date       DATE
+);
+
+-- 28. Test Cases
+CREATE TABLE IF NOT EXISTS test_cases (
+    id              BIGSERIAL PRIMARY KEY,
+    jira_ticket_id  TEXT NOT NULL,
+    tc_index        INTEGER NOT NULL,
+    phase           VARCHAR(8) NOT NULL DEFAULT 'qa',
+    title           TEXT,
+    description     TEXT,
+    steps           TEXT,
+    expected_result TEXT,
+    priority        TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS test_cases_jira_phase_tc_uidx ON test_cases (jira_ticket_id, phase, tc_index);
+
+-- 29. Test Case Threads (Slack Thread -> Phase Map)
+CREATE TABLE IF NOT EXISTS testcase_threads (
+    slack_channel_id TEXT NOT NULL,
+    slack_thread_ts  TEXT NOT NULL,
+    jira_ticket_id   TEXT NOT NULL,
+    phase            VARCHAR(8) NOT NULL DEFAULT 'qa',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (slack_channel_id, slack_thread_ts)
+);
 """
 
 MIGRATIONS_SQL = """
@@ -336,6 +435,9 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'rca_runs') THEN
         ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES app_users(id) ON DELETE CASCADE;
         ALTER TABLE rca_runs ADD COLUMN IF NOT EXISTS user_email TEXT;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'test_cases') THEN
+        ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS phase VARCHAR(8) NOT NULL DEFAULT 'qa';
     END IF;
 END $$;
 """

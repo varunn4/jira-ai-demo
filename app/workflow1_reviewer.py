@@ -19,6 +19,13 @@ from app.schemas import Workflow1ReviewRequest
 LOGGER = logging.getLogger(__name__)
 VALID_NATURES = {"satisfied", "unsatisfied"}
 VALID_PRIORITIES = {"P0", "P1", "P2", "P3", "P4"}
+JIRA_PRIORITY_TO_P = {
+    "HIGHEST": "P0", "CRITICAL": "P0", "BLOCKER": "P0",
+    "HIGH": "P1", "MAJOR": "P1",
+    "MEDIUM": "P2", "NORMAL": "P2",
+    "LOW": "P3", "MINOR": "P3",
+    "LOWEST": "P4", "TRIVIAL": "P4",
+}
 
 
 @dataclass(frozen=True)
@@ -64,6 +71,10 @@ class Workflow1Reviewer:
         priority_val = str(request.priority or "").strip()
         if not priority_val or priority_val.lower() in {"none", "null", ""}:
             missing_fields.append("Priority is required (P0 - P4). Please set the ticket priority in Jira.")
+        else:
+            # Jira sends names (Highest/High/Medium/Low/Lowest); the governor works on the P0-P4 scale.
+            priority_val = JIRA_PRIORITY_TO_P.get(priority_val.upper(), priority_val)
+            payload["priority"] = priority_val
 
         # 3. GitHub Repository Validation & Access Check
         if not repo_url:
@@ -184,6 +195,10 @@ class Workflow1Reviewer:
                     )
                     trans_res = jc.transition_to_approved(request.issueKey)
                     LOGGER.info("workflow1 auto-transition for %s: %s", request.issueKey, trans_res)
+                    if trans_res.get("success"):
+                        self._sync_local_status(request.issueKey, trans_res.get("to_status") or "Governor Approved")
+                    else:
+                        LOGGER.warning("workflow1 %s NOT moved to approved status: %s", request.issueKey, trans_res.get("reason"))
                 else:
                     jc.add_comment(
                         request.issueKey,
@@ -200,8 +215,8 @@ class Workflow1Reviewer:
             db_conf = get_all_settings(self.settings)
             
             target_channel = (
-                assignee_match.channel_id
-                or reporter_match.channel_id
+                self._slack_id_or_none(assignee_match.channel_id)
+                or self._slack_id_or_none(reporter_match.channel_id)
                 or self.settings.governor_notify_channel_id
                 or db_conf.get("governor_notify_channel_id")
                 or self.settings.slack_default_channel_id
@@ -218,8 +233,10 @@ class Workflow1Reviewer:
                 )
                 sc.post_message(channel_id=target_channel, text=slack_msg)
                 LOGGER.info("workflow1 posted Slack review to channel=%s", target_channel)
+            else:
+                LOGGER.warning("workflow1 Slack notification skipped for %s: no Slack channel configured (set slack_channel_id in Settings)", request.issueKey)
         except Exception as exc:
-            LOGGER.warning("workflow1 direct Slack notification skipped: %s", exc)
+            LOGGER.error("workflow1 Slack notification FAILED for %s: %s", request.issueKey, exc)
 
         response = {
             "assignee_channel_id": assignee_match.channel_id,
@@ -345,8 +362,9 @@ class Workflow1Reviewer:
                     LOGGER.info("Successfully cloned '%s' into workspace.", repo_name)
                 return {"connected": True, "name": repo_name, "status": "cloned"}
             except Exception as exc:
-                LOGGER.warning("Auto-clone for '%s' failed: %s", repo_url, exc)
-                return {"connected": False, "name": repo_name, "error": str(exc)}
+                err = re.sub(r"(https?://)[^@/\s]+@", r"\1***@", str(exc))
+                LOGGER.warning("Auto-clone for '%s' failed: %s", repo_url, err)
+                return {"connected": False, "name": repo_name, "error": err}
 
         return {"connected": False, "name": repo_name, "error": "Repository not found in workspace"}
 
@@ -499,6 +517,28 @@ class Workflow1Reviewer:
                 return value.strip()
 
         return None
+
+    @staticmethod
+    def _slack_id_or_none(value: str | None) -> str | None:
+        """Return value only if it is a Slack conversation/user ID (C…, G…, D…, U…, W…)."""
+        v = (value or "").strip()
+        return v if re.fullmatch(r"[CGDUW][A-Z0-9]{6,}", v) else None
+
+    def _sync_local_status(self, issue_key: str, status: str) -> None:
+        """Mirror the Jira status change into our own tables so the UI shows it immediately."""
+        if not self.settings.database_url:
+            return
+        try:
+            import psycopg
+            with psycopg.connect(self.settings.database_url) as conn:
+                conn.execute("UPDATE tickets SET status = %s WHERE jira_ticket_id = %s", (status, issue_key))
+                row = conn.execute(
+                    "UPDATE jira_ticket_cache SET status = %s WHERE ticket_key = %s RETURNING project_key",
+                    (status, issue_key),
+                ).fetchone()
+                LOGGER.info("workflow1 local status for %s set to '%s' (cache row: %s)", issue_key, status, bool(row))
+        except Exception as exc:
+            LOGGER.warning("workflow1 local status sync failed for %s: %s", issue_key, exc)
 
     def _looks_like_email(self, value: str) -> bool:
         return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value.strip()))

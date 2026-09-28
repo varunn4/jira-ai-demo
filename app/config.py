@@ -227,6 +227,7 @@ class Settings:
 
     # Jira ticket cache TTL in hours (0 = always re-fetch)
     jira_cache_ttl_hours: int = int(os.getenv("JIRA_CACHE_TTL_HOURS", "1"))
+    jira_sync_interval_seconds: int = int(os.getenv("JIRA_SYNC_INTERVAL_SECONDS", "60"))
     similar_ticket_match_threshold: float = _similar_ticket_match_threshold()
     regression_match_threshold: float = _regression_match_threshold()
 

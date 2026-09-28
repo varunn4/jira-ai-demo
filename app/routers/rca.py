@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """RCA (AI Root Cause Analysis) router."""
 
 import logging

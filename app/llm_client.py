@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """LLM client implementations and provider selection.
 
 This file defines the shared LLM client interface, provider-backed clients,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Pydantic request and response models for the FastAPI layer.
 
 This file defines the structured API contracts used by endpoints, including
@@ -7,7 +9,7 @@ response.
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AnalyzeTicketRequest(BaseModel):
@@ -74,6 +76,24 @@ class Workflow1ReviewRequest(BaseModel):
     issueType: str = ""
     status: str = ""
     reporter: str = ""
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _flatten_adf_description(cls, value: Any) -> Any:
+        """Jira Cloud may send the description as an ADF document instead of a string."""
+        if not isinstance(value, dict):
+            return value
+
+        def walk(node: Any) -> list[str]:
+            if isinstance(node, dict):
+                if node.get("type") == "text":
+                    return [str(node.get("text") or "")]
+                parts = [t for c in node.get("content") or [] for t in walk(c)]
+                return parts + (["\n"] if node.get("type") in {"paragraph", "heading", "listItem"} else [])
+            return []
+
+        return "".join(walk(value)).strip()
+
     github_repo_url: Optional[str] = ""
     github_pat: Optional[str] = ""
     target_repo: Optional[str] = ""

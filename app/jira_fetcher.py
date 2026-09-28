@@ -184,51 +184,65 @@ def _fetch_all_projects() -> list[dict[str, Any]]:
     return projects
 
 
+_TICKET_FIELDS = (
+    "summary,description,status,issuetype,priority,"
+    "assignee,reporter,created,updated,parent,"
+    "subtasks,components,labels,fixVersions,comment,"
+    # Custom "github link" / "Repository URL" fields the AI Governor reads the repo from.
+    "customfield_10177,customfield_10109"
+)
+
+
+def _search_issues(jql: str) -> list[dict[str, Any]]:
+    """Return every issue matching ``jql``.
+
+    Uses the token-paginated ``/rest/api/3/search/jql`` (the legacy ``/search``
+    endpoint was removed from Jira Cloud) and falls back to the offset-paginated
+    legacy endpoints for older/self-hosted instances.
+    """
+    issues: list[dict[str, Any]] = []
+    first_error: Optional[Exception] = None
+
+    try:
+        token: Optional[str] = None
+        while True:
+            params: dict[str, Any] = {"jql": jql, "maxResults": 100, "fields": _TICKET_FIELDS}
+            if token:
+                params["nextPageToken"] = token
+            data = _jira_get("/rest/api/3/search/jql", params)
+            issues.extend(data.get("issues", []))
+            token = data.get("nextPageToken")
+            if data.get("isLast") is True or not token:
+                return issues
+    except Exception as exc:  # noqa: BLE001
+        first_error = exc
+        log.debug("Jira search via /rest/api/3/search/jql failed: %s", exc)
+        issues = []
+
+    for search_path in ("/rest/api/3/search", "/rest/api/2/search"):
+        try:
+            start = 0
+            issues = []
+            while True:
+                data = _jira_get(
+                    search_path,
+                    {"jql": jql, "maxResults": 100, "startAt": start, "fields": _TICKET_FIELDS},
+                )
+                batch = data.get("issues", [])
+                issues.extend(batch)
+                start += len(batch)
+                total = data.get("total")
+                if not batch or len(batch) < 100 or (total is not None and start >= total):
+                    return issues
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Jira search via %s failed: %s", search_path, exc)
+
+    raise RuntimeError(f"All Jira search endpoints failed for JQL {jql!r}: {first_error}")
+
+
 def _fetch_tickets_for_project(project_key: str) -> list[dict[str, Any]]:
-    """Paginate through all issues in a Jira project using standard /rest/api/3/search or /rest/api/2/search."""
-    tickets: list[dict[str, Any]] = []
-    start = 0
-
-    fields = (
-        "summary,description,status,issuetype,priority,"
-        "assignee,reporter,created,updated,parent,"
-        "subtasks,components,labels,fixVersions,comment"
-    )
-
-    while True:
-        params: dict[str, Any] = {
-            "jql": f'project="{project_key}" ORDER BY created DESC',
-            "maxResults": 100,
-            "startAt": start,
-            "fields": fields,
-        }
-
-        # Try standard search endpoints in order: /rest/api/3/search -> /rest/api/2/search -> /rest/api/3/search/jql
-        data = None
-        for search_path in ("/rest/api/3/search", "/rest/api/2/search", "/rest/api/3/search/jql"):
-            try:
-                data = _jira_get(search_path, params)
-                break
-            except Exception as e:
-                log.debug("Jira search via %s failed: %s", search_path, e)
-                continue
-
-        if not data or not isinstance(data, dict):
-            break
-
-        batch = data.get("issues", [])
-        if not batch:
-            break
-
-        tickets.extend(batch)
-        start += len(batch)
-        total = data.get("total")
-        if total is not None and start >= total:
-            break
-        if len(batch) < 100:
-            break
-
-    return tickets
+    """Fetch every issue in a Jira project."""
+    return _search_issues(f'project="{project_key}" ORDER BY created DESC')
 
 
 # ─── PostgreSQL writers ──────────────────────────────────────────────────────
@@ -273,10 +287,18 @@ def _ticket_columns(ticket: dict[str, Any]) -> dict[str, Any]:
     def _ts(val: Any) -> Optional[datetime]:
         if not val:
             return None
+        text = str(val).replace("Z", "+00:00")
         try:
-            return datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+            return datetime.fromisoformat(text)
         except ValueError:
-            return None
+            pass
+        # Jira sends e.g. 2026-09-27T11:15:42.585+0530, which fromisoformat rejects before Python 3.11.
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        return None
 
     return {
         "ticket_key": key,
@@ -540,6 +562,52 @@ def fetch_project_tickets(
         conn.commit()
         log.info("Fetched and stored %d tickets for project %s", len(tickets), key)
         return tickets
+
+
+def sync_recent_tickets(lookback_minutes: int = 10) -> int:
+    """Pull tickets created/updated in Jira recently into ``jira_ticket_cache``.
+
+    This is what makes tickets created directly in Jira appear on the dashboard:
+    the TTL-gated :func:`fetch_all_tickets` treats a project as fresh as soon as
+    *any* of its rows was written (including rows the platform inserts itself
+    when it creates a ticket), so it never picks up Jira-side changes.
+    Projects with no cached rows get a full fetch. Returns the number of tickets
+    upserted.
+    """
+    if not all([settings.jira_base_url, settings.jira_email, settings.jira_api_token]):
+        return 0
+    if not settings.database_url or not _jira_credentials_are_valid():
+        return 0
+
+    keys = _configured_project_keys()
+    if not keys:
+        keys = [str(p["key"]) for p in _fetch_all_projects() if p.get("key")]
+
+    synced = 0
+    with psycopg.connect(settings.database_url) as conn:
+        for key in keys:
+            try:
+                has_rows = conn.execute(
+                    "SELECT 1 FROM jira_ticket_cache WHERE UPPER(project_key) = %s LIMIT 1",
+                    (key.upper(),),
+                ).fetchone()
+                if has_rows:
+                    jql = (
+                        f'project="{key}" AND updated >= "-{max(1, lookback_minutes)}m" '
+                        "ORDER BY updated DESC"
+                    )
+                    tickets = _search_issues(jql)
+                else:
+                    tickets = _fetch_tickets_for_project(key)
+                _upsert_tickets(conn, tickets)
+                conn.commit()
+                synced += len(tickets)
+            except Exception as exc:  # noqa: BLE001
+                conn.rollback()
+                log.warning("Incremental Jira sync failed for project %s: %s", key, exc)
+    if synced:
+        log.info("Incremental Jira sync upserted %d ticket(s)", synced)
+    return synced
 
 
 def fetch_live_statuses(keys: list[str]) -> dict[str, str]:

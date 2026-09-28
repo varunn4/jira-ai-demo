@@ -86,6 +86,12 @@
               "name": "createdAt",
               "value": "={{ $json.body.issue.fields.created ?? '' }}",
               "type": "string"
+            },
+            {
+              "id": "7e5f0a89-5678-89ab-ef01-234567890124",
+              "name": "github_repo_url",
+              "value": "={{ $json.body.issue.fields.customfield_10177 ?? $json.body.issue.fields.customfield_10109 ?? '' }}",
+              "type": "string"
             }
           ]
         },
@@ -115,7 +121,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  issueKey: $json.issueKey,\n  summary: $json.summary,\n  description: $json.description,\n  assignee: $json.assignee,\n  email: $json.email,\n  dueDate: $json.dueDate,\n  priority: $json.priority,\n  issueType: $json.issueType,\n  status: $json.status,\n  reporter: $json.reporter,\n  createdAt: $json.createdAt\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  issueKey: $json.issueKey,\n  summary: $json.summary,\n  description: $json.description,\n  assignee: $json.assignee,\n  email: $json.email,\n  dueDate: $json.dueDate,\n  priority: $json.priority,\n  issueType: $json.issueType,\n  status: $json.status,\n  reporter: $json.reporter,\n  createdAt: $json.createdAt,\n  github_repo_url: $json.github_repo_url\n}) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",

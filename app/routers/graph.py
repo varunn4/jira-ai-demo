@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Graph Administration and Neo4j endpoints router."""
 
 import logging
