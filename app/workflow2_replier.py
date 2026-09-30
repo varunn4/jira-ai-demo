@@ -136,56 +136,70 @@ class Workflow2Replier:
 
         msg_clean = user_message.strip()
 
-        # Require an explicit transition verb before touching Jira. Without this gate,
-        # ordinary phrasing like "make sure this is done" matched the keyword scan and
-        # silently transitioned a real ticket.
-        intent_re = r"(?i)\b(move|transition|change|set|update|mark|shift|put|make)\b"
+        # Require an explicit transition verb before touching Jira.
+        intent_re = r"(?i)\b(move|transition|change|set|update|mark|shift|put|make|drag)\b"
         if not re.search(intent_re, msg_clean):
             return None
-        if re.search(r"(?i)\b(make sure|makes sure|how do i|how to|can you explain|what)\b", msg_clean):
+        if re.search(r"(?i)\b(make sure|makes sure|how do i|how to|can you explain|what|generate)\b", msg_clean):
             return None
 
-        # Look for status change keywords
-        status_keywords = [
-            "in dev",
-            "ai approved",
-            "ready for qa",
-            "in qa",
-            "closed",
-            "to do",
-            "in progress",
-            "done",
-        ]
+        # Extract issue key from message or ticket context
+        issue_key = None
+        match = re.search(r"(?i)\b([a-zA-Z0-9]+-\d+)\b", msg_clean)
+        if match:
+            issue_key = match.group(1).upper()
+        elif ticket and ticket.get("jira_ticket_id"):
+            issue_key = ticket["jira_ticket_id"].upper()
+
+        if not issue_key or issue_key in {"GENERAL", "GENERAL TICKET", "N/A"}:
+            return None
+
+        # Match specific workflow statuses
+        status_map = {
+            "in progress - dev": "IN PROGRESS - DEV",
+            "in-progress - dev": "IN PROGRESS - DEV",
+            "in progress": "IN PROGRESS - DEV",
+            "in dev": "IN PROGRESS - DEV",
+            "in development": "IN PROGRESS - DEV",
+            "in review - qa": "IN REVIEW - QA",
+            "in-review - qa": "IN REVIEW - QA",
+            "in review": "IN REVIEW - QA",
+            "in qa": "IN REVIEW - QA",
+            "qa ready": "QA READY",
+            "ready for qa": "QA READY",
+            "governor approved": "GOVERNOR APPROVED",
+            "ai approved": "GOVERNOR APPROVED",
+            "approved": "GOVERNOR APPROVED",
+            "to do": "TO DO",
+            "todo": "TO DO",
+            "done": "DONE",
+            "closed": "DONE",
+            "resolved": "DONE",
+        }
 
         target_status = None
-        for sk in status_keywords:
-            pattern = rf"(?i)\b(?:status\s*[-:]?\s*|into\s+|to\s+){re.escape(sk)}\b"
-            if re.search(pattern, msg_clean) or re.search(rf"(?i)\bmake\s+.*?\b{re.escape(sk)}\b", msg_clean):
-                # Standardize title case
-                target_status = " ".join(word.capitalize() for word in sk.split())
-                if target_status.lower() == "in dev":
-                    target_status = "In Dev"
-                elif target_status.lower() == "ai approved":
-                    target_status = "AI Approved"
-                elif target_status.lower() == "ready for qa":
-                    target_status = "Ready for QA"
-                elif target_status.lower() == "in qa":
-                    target_status = "In QA"
-                break
+        # 1. Check explicit "status - <target>" pattern
+        status_phrase_m = re.search(r"(?i)\b(?:status\s*[-:]?\s*|into\s+|to\s+)([a-zA-Z0-9\s\-]+?)(?:\s+in\s+jira|\s*[\.\!]|\s*$)", msg_clean)
+        if status_phrase_m:
+            candidate_raw = status_phrase_m.group(1).strip().lower()
+            if candidate_raw in status_map:
+                target_status = status_map[candidate_raw]
+            else:
+                for k, v in status_map.items():
+                    if k in candidate_raw:
+                        target_status = v
+                        break
+                if not target_status and len(candidate_raw) >= 2:
+                    target_status = candidate_raw.title()
+
+        # 2. Check keyword mentions in message
+        if not target_status:
+            for sk, real_status in status_map.items():
+                if re.search(rf"(?i)\b{re.escape(sk)}\b", msg_clean):
+                    target_status = real_status
+                    break
 
         if not target_status:
-            return None
-
-        # Extract issue key from ticket context or message
-        issue_key = None
-        if ticket and ticket.get("jira_ticket_id"):
-            issue_key = ticket["jira_ticket_id"]
-        else:
-            match = re.search(r"(?i)\b([a-zA-Z0-9]+-\d+)\b", msg_clean)
-            if match:
-                issue_key = match.group(1).upper()
-
-        if not issue_key:
             return None
 
         jc = JiraClient(self.settings)
@@ -195,21 +209,26 @@ class Workflow2Replier:
         try:
             res = jc.transition_to(issue_key, target_status)
             if res.get("success"):
-                # Update local cache
+                final_to_status = res.get("to_status") or target_status
+                # Update local cache and tickets table
                 if self.settings.database_url:
                     try:
                         import psycopg
                         with psycopg.connect(self.settings.database_url) as conn:
                             conn.execute(
                                 "UPDATE jira_ticket_cache SET status = %s WHERE UPPER(ticket_key) = %s",
-                                (target_status, issue_key.upper()),
+                                (final_to_status, issue_key.upper()),
+                            )
+                            conn.execute(
+                                "UPDATE tickets SET status = %s WHERE UPPER(jira_ticket_id) = %s",
+                                (final_to_status, issue_key.upper()),
                             )
                             conn.commit()
                     except Exception:
                         pass
-                return f"Status for ticket *{issue_key}* has been updated to *{target_status}* in Jira Cloud."
+                return f"Status for ticket *{issue_key}* has been updated to *{final_to_status}* in Jira Cloud."
             else:
-                reason = res.get("reason") or "Transition not allowed in current workflow"
+                reason = res.get("reason") or "Transition not allowed in current Jira workflow state"
                 return f"Could not transition *{issue_key}* to *{target_status}*: {reason}."
         except Exception as exc:
             LOGGER.warning("Direct status transition failed for %s: %s", issue_key, exc)
