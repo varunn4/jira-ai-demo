@@ -236,9 +236,20 @@ class Workflow4EstimateReview:
     # ── slack ────────────────────────────────────────────────────────────────
 
     def _resolve_group_channel_id(self) -> str:
-        """Resolve team/group Slack channel ID from env or DB channelid_table."""
-        if (self.settings.effort_group_channel_id or "").strip():
-            return self.settings.effort_group_channel_id.strip()
+        """Resolve team/group Slack channel ID from env, DB app_settings, or channelid_table."""
+        from app.routers.settings import get_all_settings
+        db_conf = get_all_settings(self.settings) if self.settings.database_url else {}
+        chan = (
+            self.settings.effort_group_channel_id
+            or db_conf.get("effort_group_channel_id")
+            or self.settings.governor_notify_channel_id
+            or db_conf.get("governor_notify_channel_id")
+            or self.settings.slack_default_channel_id
+            or db_conf.get("slack_default_channel_id")
+            or ""
+        )
+        if chan.strip():
+            return chan.strip()
         try:
             with self.store._connect() as conn:
                 row = conn.execute(
@@ -248,7 +259,7 @@ class Workflow4EstimateReview:
                     return str(row["channel_id"]).strip()
         except Exception:
             pass
-        return (self.settings.slack_default_channel_id or "").strip()
+        return ""
 
     def _post(self, channels: list[str], text: str) -> list[str]:
         from app.slack_client import SlackClient

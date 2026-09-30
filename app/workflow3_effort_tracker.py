@@ -160,10 +160,11 @@ class Workflow3EffortTracker:
         sent: list[dict[str, Any]] = []
         now = datetime.now(timezone.utc)
         hours_per_day = self.settings.effort_working_hours_per_day
+        group_channel = self._resolve_group_channel_id()
 
         for row in self.store.in_dev_rows():
             elapsed = elapsed_working_hours(row["tracking_started_at"], now, hours_per_day)
-            estimate = float(row["estimate_hours"])
+            estimate = float(row.get("estimate_hours") or 8.0)
             pct = percentage_used(elapsed, estimate)
             self.store.upsert(row["jira_ticket_id"], elapsed_hours=elapsed)
 
@@ -172,9 +173,10 @@ class Workflow3EffortTracker:
                 continue
 
             text = self._alert_text(row, elapsed, estimate, pct, level)
-            targets = [row.get("assignee_slack_id") or ""]
-            group_channel = self._resolve_group_channel_id()
-            if level == "BREACHED" and group_channel:
+            targets = []
+            if row.get("assignee_slack_id"):
+                targets.append(row["assignee_slack_id"])
+            if group_channel and (level == "BREACHED" or not targets):
                 targets.append(group_channel)
 
             delivered = self._post(targets, text)
@@ -214,48 +216,72 @@ class Workflow3EffortTracker:
     # ── daily check-in ───────────────────────────────────────────────────────
 
     def daily_checkin(self) -> dict[str, Any]:
-        """One message per developer covering every ticket they have in dev."""
+        """Post a consolidated team standup digest to Slack and individual DMs."""
         if not self.settings.effort_tracking_enabled:
             return {"skipped": "EFFORT_TRACKING_ENABLED is false", "messages_sent": 0}
 
         now = datetime.now(timezone.utc)
         hours_per_day = self.settings.effort_working_hours_per_day
-        by_dev: dict[str, list[dict[str, Any]]] = {}
+        group_channel = self._resolve_group_channel_id()
+        rows = self.store.in_dev_rows()
 
-        for row in self.store.in_dev_rows():
-            channel = row.get("assignee_slack_id")
-            if not channel:
-                continue
-            elapsed = elapsed_working_hours(row["tracking_started_at"], now, hours_per_day)
-            by_dev.setdefault(channel, []).append({**row, "_elapsed": elapsed})
+        if not rows:
+            self._reconcile()
+            rows = self.store.in_dev_rows()
+
+        if not rows:
+            return {"messages_sent": 0, "tickets": 0, "detail": "No tickets currently in dev status"}
+
+        # 1. Post team-level standup digest to the team channel
+        lines = [
+            "*AI Governor Daily Dev Standup Check-in*",
+            f"Active Tickets in Development ({len(rows)}):"
+        ]
+        for r in rows:
+            elapsed = elapsed_working_hours(r["tracking_started_at"], now, hours_per_day)
+            estimate = float(r.get("estimate_hours") or 8.0)
+            remaining = max(0.0, estimate - elapsed)
+            pct = percentage_used(elapsed, estimate)
+            assignee = r.get("assignee_name") or "Unassigned"
+            lines.append(
+                f"- *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
+                f"  Assignee: *{assignee}* | Estimate: `{estimate:g}h` | Elapsed: `{elapsed:g}h` ({pct:.0f}%) | Remaining: `{remaining:g}h`"
+            )
+        lines.append("\nPlease reply in thread if there are any blockers or architectural hurdles.")
 
         sent = 0
-        for channel, rows in by_dev.items():
-            lines = ["*Daily effort check-in*"]
+        if group_channel and self._post([group_channel], "\n".join(lines)):
+            sent += 1
             for r in rows:
-                estimate = float(r["estimate_hours"])
-                remaining = max(0.0, estimate - r["_elapsed"])
-                lines.append(
-                    f"- *{r['jira_ticket_id']}*: {r['_elapsed']:g} h used of {estimate:g} h "
-                    f"- {remaining:g} h remaining"
-                )
-            lines.append("\nAre you on track?")
-            if self._post([channel], "\n".join(lines)):
-                sent += 1
-                for r in rows:
-                    self.store.upsert(r["jira_ticket_id"], last_checkin_at=now)
+                self.store.upsert(r["jira_ticket_id"], last_checkin_at=now)
 
-        log.info("workflow3 daily check-in: %d developer(s) messaged", sent)
-        return {"messages_sent": sent, "developers": len(by_dev)}
+        # 2. Also message individual developers if known
+        by_dev: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            channel = r.get("assignee_slack_id")
+            if channel and channel != group_channel:
+                elapsed = elapsed_working_hours(r["tracking_started_at"], now, hours_per_day)
+                by_dev.setdefault(channel, []).append({**r, "_elapsed": elapsed})
+
+        for channel, dev_rows in by_dev.items():
+            dm_lines = ["*Your Daily Effort Check-in*"]
+            for r in dev_rows:
+                estimate = float(r.get("estimate_hours") or 8.0)
+                remaining = max(0.0, estimate - r["_elapsed"])
+                dm_lines.append(
+                    f"- *{r['jira_ticket_id']}*: {r['_elapsed']:g}h used of {estimate:g}h ({remaining:g}h remaining)"
+                )
+            dm_lines.append("\nAre you on track?")
+            if self._post([channel], "\n".join(dm_lines)):
+                sent += 1
+
+        log.info("workflow3 daily check-in: %d messages sent across %d tickets", sent, len(rows))
+        return {"messages_sent": sent, "tickets": len(rows), "group_channel": group_channel}
 
     # ── closure ──────────────────────────────────────────────────────────────
 
     def _close_completed(self) -> int:
-        """Finalise tickets that have reached the closure status.
-
-        `actual_hours` is the time we measured, not Jira's logged time, which is
-        only as reliable as the team's logging discipline.
-        """
+        """Finalise tickets that have reached the closure status."""
         closed_candidates = [
             s.strip() for s in (self.settings.effort_closure_status or "").split(",") if s.strip()
         ]
@@ -289,9 +315,20 @@ class Workflow3EffortTracker:
         return count
 
     def _resolve_group_channel_id(self) -> str:
-        """Resolve team/group Slack channel ID from env or DB channelid_table."""
-        if (self.settings.effort_group_channel_id or "").strip():
-            return self.settings.effort_group_channel_id.strip()
+        """Resolve team/group Slack channel ID from env, DB app_settings, or channelid_table."""
+        from app.routers.settings import get_all_settings
+        db_conf = get_all_settings(self.settings) if self.settings.database_url else {}
+        chan = (
+            self.settings.effort_group_channel_id
+            or db_conf.get("effort_group_channel_id")
+            or self.settings.governor_notify_channel_id
+            or db_conf.get("governor_notify_channel_id")
+            or self.settings.slack_default_channel_id
+            or db_conf.get("slack_default_channel_id")
+            or ""
+        )
+        if chan.strip():
+            return chan.strip()
         try:
             with self.store._connect() as conn:
                 row = conn.execute(
@@ -301,7 +338,7 @@ class Workflow3EffortTracker:
                     return str(row["channel_id"]).strip()
         except Exception:
             pass
-        return (self.settings.slack_default_channel_id or "").strip()
+        return ""
 
     def _post(self, channels: list[str], text: str) -> list[str]:
         from app.slack_client import SlackClient
@@ -310,7 +347,8 @@ class Workflow3EffortTracker:
         delivered: list[str] = []
         for channel in [c for c in channels if c]:
             try:
-                if client.post_message(channel_id=channel, text=text).sent:
+                res = client.post_message(channel_id=channel, text=text)
+                if res.sent:
                     delivered.append(channel)
             except Exception as exc:  # noqa: BLE001 - one bad channel must not stop the rest
                 log.warning("workflow3 Slack post to %s failed: %s", channel, exc)
