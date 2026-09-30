@@ -497,13 +497,15 @@ def test_slack_connection(
             channel_id=channel_id,
             text="⚡ *AI Governor Health Check* — Slack bot connection verified successfully from the System Configuration panel.",
         )
-        if res.get("ok") or res.get("sent"):
+        is_sent = getattr(res, "sent", False) if hasattr(res, "sent") else bool(isinstance(res, dict) and res.get("sent"))
+        if is_sent:
             return {
                 "success": True,
                 "message": f"Successfully connected to Slack and posted test ping to channel {channel_id}!",
                 "channel_id": channel_id,
             }
-        return {"success": False, "error": f"Slack API error: {res.get('error', 'unknown error')}"}
+        err_msg = res.raw.get("error", "unknown error") if hasattr(res, "raw") else "Delivery failed"
+        return {"success": False, "error": f"Slack API error: {err_msg}"}
     except Exception as exc:
         log.exception("Slack test connection failed")
         return {"success": False, "error": str(exc)}
