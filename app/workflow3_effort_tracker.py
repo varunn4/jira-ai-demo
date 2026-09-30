@@ -65,15 +65,14 @@ class Workflow3EffortTracker:
         ])
         status_list = list({s.lower(): s for s in status_candidates}.values())
 
+        # Always do a live Jira sync if possible so recent board moves are immediately recognized
+        try:
+            from app import jira_fetcher
+            jira_fetcher.fetch_all_tickets(force_refresh=True)
+        except Exception as sync_exc:
+            log.warning("workflow3 live cache sync skipped: %s", sync_exc)
+
         cached_rows = self.store.cached_tickets_by_status(status_list)
-        if not cached_rows:
-            # Sync fresh from Jira if local cache is empty or hasn't picked up recent board moves
-            try:
-                from app import jira_fetcher
-                jira_fetcher.fetch_all_tickets(force=True)
-                cached_rows = self.store.cached_tickets_by_status(status_list)
-            except Exception as sync_exc:
-                log.warning("workflow3 live cache sync skipped: %s", sync_exc)
 
         in_dev = {
             str(r["ticket_key"]).upper(): r
@@ -92,47 +91,70 @@ class Workflow3EffortTracker:
                 self.store.reset_clock(row["jira_ticket_id"])
                 log.info("workflow3: %s left dev statuses, clock reset", row["jira_ticket_id"])
 
-        started = 0
         for key, ticket in in_dev.items():
             existing = self.store.get(key)
             if existing and existing.get("tracking_started_at"):
                 continue
 
-            estimate = self._original_estimate_hours(key)
+            estimate = self._original_estimate_hours(key) or 8.0  # default to 8h if unestimated
             fields: dict[str, Any] = {
                 "project_key": ticket.get("project_key"),
                 "summary": ticket.get("summary"),
                 "assignee_name": ticket.get("assignee_name"),
                 "assignee_slack_id": self.store.slack_id_for(ticket.get("assignee_name")),
                 "is_complete": False,
+                "estimate_hours": estimate,
+                "tracking_started_at": datetime.now(timezone.utc),
             }
-            if estimate:
-                # The clock only starts once we know what it is counting against.
-                fields.update(estimate_hours=estimate, tracking_started_at=datetime.now(timezone.utc))
-                started += 1
-            else:
-                fields["estimate_hours"] = None
             self.store.upsert(key, **fields)
 
-        return started
+        return len(in_dev)
 
     def _original_estimate_hours(self, issue_key: str) -> float | None:
-        """Read the dev's Original Estimate from Jira. Not held in the cache."""
+        """Read the dev's Original Estimate from Jira Cloud or DB metadata."""
+        import re
+        # 1. Check Jira Cloud live
         try:
             from app.jira_client import JiraClient
 
             jc = JiraClient(self.settings)
-            if not jc.is_configured():
-                return None
-            issue = jc._request(
-                "GET", f"/rest/api/3/issue/{issue_key}", params={"fields": "timetracking"}
-            )
-            tt = ((issue or {}).get("fields") or {}).get("timetracking") or {}
-            seconds = tt.get("originalEstimateSeconds")
-            return round(float(seconds) / 3600.0, 2) if seconds else None
-        except Exception as exc:  # noqa: BLE001 - a missing estimate must not break the run
-            log.warning("Could not read Original Estimate for %s: %s", issue_key, exc)
-            return None
+            if jc.is_configured():
+                issue = jc._request(
+                    "GET", f"/rest/api/3/issue/{issue_key}", params={"fields": "timetracking"}
+                )
+                tt = ((issue or {}).get("fields") or {}).get("timetracking") or {}
+                seconds = tt.get("originalEstimateSeconds")
+                if seconds:
+                    return round(float(seconds) / 3600.0, 2)
+        except Exception as exc:
+            log.warning("Could not read Original Estimate from Jira for %s: %s", issue_key, exc)
+
+        # 2. Check tickets table payload
+        if self.settings.database_url:
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+                with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                    row = conn.execute(
+                        "SELECT jira_payload FROM tickets WHERE UPPER(jira_ticket_id) = %s",
+                        (issue_key.upper(),),
+                    ).fetchone()
+                    if row and row.get("jira_payload"):
+                        est_str = str(row["jira_payload"].get("estimated_time") or "")
+                        # Parse '8h', '16h', '2d', etc.
+                        d_m = re.search(r"(\d+(?:\.\d+)?)\s*d", est_str, re.I)
+                        h_m = re.search(r"(\d+(?:\.\d+)?)\s*h", est_str, re.I)
+                        hours = 0.0
+                        if d_m:
+                            hours += float(d_m.group(1)) * float(self.settings.effort_working_hours_per_day or 8.0)
+                        if h_m:
+                            hours += float(h_m.group(1))
+                        if hours > 0:
+                            return round(hours, 2)
+            except Exception as db_exc:
+                log.warning("Could not read estimate from DB for %s: %s", issue_key, db_exc)
+
+        return None
 
     def _fire_alerts(self) -> list[dict[str, Any]]:
         sent: list[dict[str, Any]] = []
