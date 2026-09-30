@@ -85,6 +85,18 @@ class Workflow2Replier:
                 "slack_channel_id": request.slack_channel_id,
             }
 
+        # 2b. Check for Direct Ticket Listing / Overview Queries
+        ticket_list_reply = self._handle_direct_ticket_list_query(request.user_message)
+        if ticket_list_reply:
+            if ticket and ticket.get("id"):
+                self._save_single_message(str(ticket["id"]), "user", request.user_message)
+                self._save_single_message(str(ticket["id"]), "bot", ticket_list_reply)
+            return {
+                "reply": ticket_list_reply,
+                "slack_thread_ts": request.slack_thread_ts,
+                "slack_channel_id": request.slack_channel_id,
+            }
+
         # 3. Process with LLM
         ticket_id = str(ticket.get("id") or ticket.get("jira_ticket_id") or "general")
         try:
@@ -202,6 +214,71 @@ class Workflow2Replier:
         except Exception as exc:
             LOGGER.warning("Direct status transition failed for %s: %s", issue_key, exc)
             return f"Failed to transition *{issue_key}* to *{target_status}*: {str(exc)}."
+
+    def _fetch_active_tickets_summary(self) -> list[dict[str, Any]]:
+        """Fetch real Jira tickets from the local PostgreSQL cache or live sync."""
+        if not self.settings.database_url:
+            return []
+        import psycopg
+        from psycopg.rows import dict_row
+        try:
+            with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT ticket_key, summary, status, assignee_name, priority
+                    FROM jira_ticket_cache
+                    ORDER BY updated_at DESC
+                    LIMIT 30
+                    """
+                ).fetchall()
+                if not rows:
+                    try:
+                        from app import jira_fetcher
+                        jira_fetcher.fetch_all_tickets(force=True)
+                        rows = conn.execute(
+                            """
+                            SELECT ticket_key, summary, status, assignee_name, priority
+                            FROM jira_ticket_cache
+                            ORDER BY updated_at DESC
+                            LIMIT 30
+                            """
+                        ).fetchall()
+                    except Exception as sync_exc:
+                        LOGGER.warning("workflow2 live fetch fallback failed: %s", sync_exc)
+                return [dict(r) for r in rows]
+        except Exception as exc:
+            LOGGER.warning("Could not fetch active tickets: %s", exc)
+            return []
+
+    def _handle_direct_ticket_list_query(self, user_message: str) -> str | None:
+        """Instantly answers general queries like 'what are the current tickets' with real Jira data."""
+        import re
+        clean_msg = user_message.strip().lower()
+
+        # Check for list/overview triggers
+        list_triggers = [
+            "current ticket", "current tickekt", "available ticket", "open ticket",
+            "list ticket", "show ticket", "what are the ticket", "what tickets",
+            "all ticket", "active ticket", "my ticket", "check and tell me what are the"
+        ]
+        if any(t in clean_msg for t in list_triggers):
+            tickets = self._fetch_active_tickets_summary()
+            if not tickets:
+                return "There are currently no tickets found or cached from your connected Jira projects."
+
+            lines = ["*Current Available Jira Tickets:*"]
+            for t in tickets[:15]:
+                key = t.get("ticket_key", "N/A")
+                summary = t.get("summary", "No summary")
+                status = t.get("status", "To Do")
+                assignee = t.get("assignee_name") or "Unassigned"
+                priority = t.get("priority") or "Medium"
+                lines.append(f"- *{key}*: {summary}\n  Status: `{status}` | Priority: `{priority}` | Assignee: *{assignee}*")
+
+            if len(tickets) > 15:
+                lines.append(f"\n_...and {len(tickets) - 15} more tickets in Jira Cloud._")
+            return "\n".join(lines)
+        return None
 
     def _find_ticket(self, slack_thread_ts: str, user_message: str = "", user_id: str = "") -> dict[str, Any]:
         if not self.settings.database_url:
@@ -390,6 +467,14 @@ class Workflow2Replier:
                 f"- Connected Repository: {t_repo}\n"
                 f"- Initial AI Review / Assessment:\n{t_rev}\n"
             )
+            if t_key in {"N/A", "General Ticket", "general"}:
+                active_tickets = self._fetch_active_tickets_summary()
+                if active_tickets:
+                    tickets_blob = "\n".join(
+                        f"  * {t.get('ticket_key')}: {t.get('summary')} (Status: {t.get('status')}, Assignee: {t.get('assignee_name') or 'Unassigned'})"
+                        for t in active_tickets[:15]
+                    )
+                    context_header += f"\nActive Jira Tickets in Workspace:\n{tickets_blob}\n"
 
         full_system_prompt = base_system_message + context_header
         client = build_llm_client(self.settings)
