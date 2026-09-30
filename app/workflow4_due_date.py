@@ -18,8 +18,11 @@ LOGGER = logging.getLogger(__name__)
 
 DONE_STATUSES = {
     "Done",
+    "DONE",
     "Closed",
     "Resolved",
+    "QA Ready",
+    "QA READY",
     "Ready for QA",
     "Ready for Deployment",
 }

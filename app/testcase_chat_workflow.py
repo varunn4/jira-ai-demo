@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -157,19 +158,60 @@ class TestCaseChatWorkflow:
             "started",
             input_data={"slack_channel_id": slack_channel_id, "slack_thread_ts": slack_thread_ts},
         )
-        ticket_row = self.resolve_ticket_from_thread(slack_channel_id, slack_thread_ts)
+        # A ticket named in the message always wins. If the user says "status of
+        # SCRUM-30" while sitting in SCRUM-29's thread, they mean SCRUM-30 - answering
+        # about the thread's ticket instead would be answering a different question.
+        named_key = self.extract_issue_key(user_message)
+        ticket_row = self.resolve_ticket_by_key(named_key) if named_key else None
+        if ticket_row:
+            log.info("workflow2 resolved %s named in the message text", named_key)
+        else:
+            ticket_row = self.resolve_ticket_from_thread(slack_channel_id, slack_thread_ts)
+
+        # Give the model the ticket's real fields, not just its key.
+        ticket_row = self._enrich_ticket(ticket_row)
+
         if not ticket_row:
+            named_key = self.extract_issue_key(user_message)
             self._log_step(
                 "1_resolve_ticket",
                 "completed",
-                output={"ticket_found": False},
+                output={"ticket_found": False, "named_key": named_key},
             )
+            if named_key:
+                return finish(
+                    f"I could not find *{named_key}* in this workspace. Check the ticket "
+                    f"key, or ask inside the thread where that ticket was posted.",
+                    "ticket_not_found",
+                )
             return finish(
-                "I couldn't link this thread to a Jira ticket, so I can't help here.",
+                "I couldn't link this thread to a Jira ticket. Reply inside the ticket's "
+                "thread, or name the ticket key (for example SCRUM-30) in your message.",
                 "ticket_not_found",
             )
 
         ticket_id = str(ticket_row["jira_ticket_id"])
+
+        # Read-only assistant: say so rather than letting the model answer around it,
+        # which would leave the user thinking the status had been changed.
+        if self.is_status_change_request(user_message):
+            current = str(ticket_row.get("status") or "").strip()
+            current_line = f"\nIts current status is *{current}*." if current else ""
+            self._log_step(
+                "status_change_request",
+                "declined",
+                output={"jira_ticket_id": ticket_id, "current_status": current},
+            )
+            return finish(
+                f"I can't change the status of *{ticket_id}* myself.{current_line}\n\n"
+                f"The only transition the AI Governor performs automatically is moving a "
+                f"ticket to the approved status once it passes the Workflow 1 quality "
+                f"review. Every other status change has to be made in Jira directly.\n\n"
+                f"I can still help here: ask me about this ticket's details, its review "
+                f"feedback, or its test cases.",
+                "status_change_not_supported",
+                {"jira_ticket_id": ticket_id},
+            )
         # The thread's own phase (recorded by the closing flow) is authoritative:
         # WF2 sends no phase, so without this a dev thread would load QA cases.
         resolved_phase = ticket_row.get("_phase")
@@ -386,6 +428,104 @@ class TestCaseChatWorkflow:
             {"jira_ticket_id": ticket_id, "intent": intent},
         )
 
+    def _enrich_ticket(self, ticket: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Fill in the ticket's real fields from the Jira cache.
+
+        The `tickets` row stores the Jira create response as jira_payload, which is
+        only {id, key, self} - no summary, no description. The LLM was therefore
+        handed a ticket with no content and concluded the ticket did not exist,
+        answering "SCRUM-29 not found in the current Jira list" for a ticket that
+        plainly existed. jira_ticket_cache mirrors Jira and has the real fields.
+        """
+        if not ticket or not ticket.get("jira_ticket_id"):
+            return ticket
+        key = str(ticket["jira_ticket_id"]).strip().upper()
+        try:
+            with self._connect() as conn:
+                if not self._table_exists(conn, "jira_ticket_cache"):
+                    return ticket
+                row = conn.execute(
+                    """
+                    SELECT ticket_key, summary, description, status, priority,
+                           issue_type, assignee_name, reporter_name, labels, updated_at
+                    FROM jira_ticket_cache
+                    WHERE UPPER(ticket_key) = %s
+                    LIMIT 1
+                    """,
+                    (key,),
+                ).fetchone()
+        except Exception as exc:  # noqa: BLE001 - enrichment must never break a reply
+            log.warning("Could not enrich ticket %s from cache: %s", key, exc)
+            return ticket
+
+        if not row:
+            log.info("Ticket %s is not in jira_ticket_cache; context stays minimal", key)
+            return ticket
+
+        # Never overwrite a value the ticket row already carries.
+        for field in (
+            "summary", "description", "priority", "issue_type",
+            "assignee_name", "reporter_name", "labels",
+        ):
+            if not ticket.get(field) and row.get(field):
+                ticket[field] = row[field]
+        # Jira is authoritative for status: the tickets row keeps the governor's own
+        # verdict ("AI Approved"), which is not the ticket's workflow status.
+        if row.get("status"):
+            ticket["status"] = row["status"]
+        ticket["_enriched_from"] = "jira_ticket_cache"
+        return ticket
+
+    def resolve_ticket_by_key(self, issue_key: str) -> dict[str, Any] | None:
+        """Resolve a ticket named explicitly in the message text.
+
+        A question asked as a NEW channel message carries its own ts as thread_ts, so
+        it matches no recorded thread and every thread-based lookup fails. That is why
+        "change the status for scrum-30" answered "ticket not found" even though
+        SCRUM-30 existed with a correct thread mapping: the lookup keyed on the wrong
+        thread. When the user names a ticket, resolve on that instead.
+        """
+        key = (issue_key or "").strip().upper()
+        if not key:
+            return None
+        try:
+            with self._connect() as conn:
+                ticket = self._ticket_row_for_issue_key(conn, key)
+                if ticket and ticket.get("jira_ticket_id"):
+                    ticket["_source"] = "issue_key_in_message"
+                    return ticket
+        except Exception as exc:  # noqa: BLE001 - lookup must never break the reply
+            log.warning("Could not resolve ticket by key %s: %s", key, exc)
+        return None
+
+    @staticmethod
+    def is_status_change_request(text: str) -> bool:
+        """Whether the user is asking the bot to change a ticket's status.
+
+        This assistant is read-only: the only transition the platform performs is the
+        automatic move to the governor-approved status after Workflow1 passes. Asking
+        and silently getting a normal answer back would leave the user believing the
+        status had changed, so these requests are answered explicitly instead.
+        """
+        msg = text or ""
+        verb = r"(?:change|set|update|move|transition|mark|shift|put|switch|convert|make)"
+        status_words = (
+            r"(?:in\s*dev|in\s*progress|ready\s*for\s*qa|in\s*qa|to\s*do|done|closed|"
+            r"resolved|blocked|backlog|code\s*review|governor\s*approved|ai\s*approved)"
+        )
+        patterns = [
+            rf"(?i)\b{verb}\b[^.?!]*\bstatus\b",          # "change the status ..."
+            rf"(?i)\bstatus\b[^.?!]*\bto\b\s*[\"']?{status_words}",  # "status to In Dev"
+            rf"(?i)\b{verb}\b[^.?!]*\b(?:to|as|into)\b\s*[\"']?{status_words}",  # "move it to Ready for QA", "mark as closed"
+        ]
+        return any(re.search(p, msg) for p in patterns)
+
+    @staticmethod
+    def extract_issue_key(text: str) -> str:
+        """First Jira-style key in the text, case-insensitively ("scrum-30" counts)."""
+        match = re.search(r"\b([A-Za-z][A-Za-z0-9]+-\d+)\b", text or "")
+        return match.group(1).upper() if match else ""
+
     def resolve_ticket_from_thread(self, channel_id: str, thread_ts: str) -> dict[str, Any] | None:
         """Map a Slack thread to the best available ticket row.
 
@@ -435,50 +575,88 @@ class TestCaseChatWorkflow:
                     ticket["_source"] = "tickets"
                     return ticket
 
-            if self._table_exists(conn, "channelid_table"):
-                channel_order_column = (
-                    "created_at" if self._column_type(conn, "channelid_table", "created_at") else "slack_thread_ts"
-                )
-                row = conn.execute(
-                    f"""
-                    SELECT jira_payload
-                    FROM channelid_table
-                    WHERE slack_channel_id = %s AND slack_thread_ts = %s
-                    ORDER BY {channel_order_column} DESC
-                    LIMIT 1
-                    """,
-                    (channel_id, thread_ts),
-                ).fetchone()
-                issue_key = self._issue_key_from_channel_row(row)
-                if issue_key:
-                    ticket = self._ticket_row_for_issue_key(
-                        conn,
-                        issue_key,
-                        fallback_payload=(row or {}).get("jira_payload"),
+            # channelid_table is a Slack user/channel directory. On deployments where
+            # it predates this code it has no slack_thread_ts / jira_payload columns,
+            # and this branch then raised UndefinedColumn - aborting the whole
+            # resolution chain before the jira_slack_conversations fallback below
+            # could ever run. Check the columns before querying, and never let one
+            # broken fallback take the others down with it.
+            if self._table_exists(conn, "channelid_table") and all(
+                self._column_type(conn, "channelid_table", col)
+                for col in ("slack_channel_id", "slack_thread_ts", "jira_payload")
+            ):
+                try:
+                    channel_order_column = (
+                        "created_at"
+                        if self._column_type(conn, "channelid_table", "created_at")
+                        else "slack_thread_ts"
                     )
-                    ticket["_source"] = "channelid_table"
-                    return ticket
+                    row = conn.execute(
+                        f"""
+                        SELECT jira_payload
+                        FROM channelid_table
+                        WHERE slack_channel_id = %s AND slack_thread_ts = %s
+                        ORDER BY {channel_order_column} DESC
+                        LIMIT 1
+                        """,
+                        (channel_id, thread_ts),
+                    ).fetchone()
+                    issue_key = self._issue_key_from_channel_row(row)
+                    if issue_key:
+                        ticket = self._ticket_row_for_issue_key(
+                            conn,
+                            issue_key,
+                            fallback_payload=(row or {}).get("jira_payload"),
+                        )
+                        ticket["_source"] = "channelid_table"
+                        return ticket
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("channelid_table thread lookup skipped: %s", exc)
 
             if self._table_exists(conn, "jira_slack_conversations"):
-                row = conn.execute(
-                    """
-                    SELECT jira_issue_key, original_ticket_data, status
-                    FROM jira_slack_conversations
-                    WHERE slack_channel_id = %s AND slack_thread_ts = %s
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                    """,
-                    (channel_id, thread_ts),
-                ).fetchone()
-                if row and row.get("jira_issue_key"):
-                    ticket = self._ticket_row_for_issue_key(
-                        conn,
-                        str(row["jira_issue_key"]),
-                        fallback_payload=row.get("original_ticket_data"),
-                        fallback_status=row.get("status"),
+                try:
+                    # issue_key is this schema's column; jira_issue_key exists only on
+                    # deployments created by conversation_store. Accept either.
+                    key_column = (
+                        "jira_issue_key"
+                        if self._column_type(conn, "jira_slack_conversations", "jira_issue_key")
+                        else "issue_key"
                     )
-                    ticket["_source"] = "jira_slack_conversations"
-                    return ticket
+                    payload_column = (
+                        "original_ticket_data"
+                        if self._column_type(
+                            conn, "jira_slack_conversations", "original_ticket_data"
+                        )
+                        else "NULL"
+                    )
+                    status_column = (
+                        "status"
+                        if self._column_type(conn, "jira_slack_conversations", "status")
+                        else "NULL"
+                    )
+                    row = conn.execute(
+                        f"""
+                        SELECT {key_column} AS issue_key,
+                               {payload_column} AS payload,
+                               {status_column} AS status
+                        FROM jira_slack_conversations
+                        WHERE slack_channel_id = %s AND slack_thread_ts = %s
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                        """,
+                        (channel_id, thread_ts),
+                    ).fetchone()
+                    if row and row.get("issue_key"):
+                        ticket = self._ticket_row_for_issue_key(
+                            conn,
+                            str(row["issue_key"]),
+                            fallback_payload=row.get("payload"),
+                            fallback_status=row.get("status"),
+                        )
+                        ticket["_source"] = "jira_slack_conversations"
+                        return ticket
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("jira_slack_conversations thread lookup skipped: %s", exc)
 
         return None
 
@@ -488,11 +666,14 @@ class TestCaseChatWorkflow:
         with self._connect() as conn:
             if not self._table_exists(conn, "test_cases"):
                 return []
+            # The column is expected_result; selecting "expected" raised UndefinedColumn
+            # and turned every "what are the test cases" question into a 500.
+            # status is not a column on this table either, so it is derived below.
             rows = conn.execute(
                 """
-                SELECT tc_index, title, steps, expected, status
+                SELECT tc_index, title, steps, expected_result AS expected
                 FROM test_cases
-                WHERE jira_ticket_id = %s AND phase = %s
+                WHERE UPPER(jira_ticket_id) = UPPER(%s) AND phase = %s
                 ORDER BY tc_index ASC
                 """,
                 (jira_ticket_id, phase),
@@ -507,7 +688,7 @@ class TestCaseChatWorkflow:
                     "title": row["title"] or f"Test Case {row['tc_index']}",
                     "steps": steps,
                     "expected": row["expected"] or "",
-                    "status": row["status"] or "pending",
+                    "status": "pending",
                 }
             )
         return test_cases

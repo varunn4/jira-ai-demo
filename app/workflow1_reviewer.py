@@ -76,6 +76,15 @@ class Workflow1Reviewer:
             priority_val = JIRA_PRIORITY_TO_P.get(priority_val.upper(), priority_val)
             payload["priority"] = priority_val
 
+        # 2b. Estimated Time / Original Estimate Validation
+        estimated_val = str(payload.get("estimatedTime") or payload.get("estimated_time") or "").strip()
+        if not estimated_val:
+            # Check if Jira timetracking or description contains an estimate pattern
+            desc_text = request.description or ""
+            if "Original Estimate" not in desc_text and "Estimate:" not in desc_text:
+                missing_fields.append("Estimated Time / Original Estimate is required (e.g. '8h', '16h', '2d') for effort tracking.")
+        payload["estimatedTime"] = estimated_val or "Not provided"
+
         # 3. GitHub Repository Validation & Access Check
         if not repo_url:
             missing_fields.append("GitHub Repository URL is required. Please link the GitHub repository in Jira description.")
@@ -91,45 +100,104 @@ class Workflow1Reviewer:
         codebase_ctx = self._get_codebase_context(repo_url, request.summary, request.description)
         payload["codebase_context"] = codebase_ctx
 
-        # If any hard mandatory field is missing, reject immediately with structured guidance
-        if missing_fields:
-            missing_text = "\n".join(f"- {m}" for m in missing_fields)
-            review_msg = (
-                f"[AI Governor Quality Check: REJECTED (Unsatisfied)]\n\n"
-                f"The ticket `{request.issueKey}` cannot be approved because mandatory fields are missing:\n\n"
-                f"{missing_text}\n\n"
-                f"Action Required: Please update these fields directly in Jira to proceed to AI Approved status."
+        # 5. User memory. Without this the LLM starts from zero on every call and its
+        # judgement drifts between otherwise identical requests from the same person.
+        from app import user_memory as _memory
+
+        # email is not a declared field on the request model, so read it from the payload.
+        identities = _memory.resolve_identities(
+            self.settings, payload.get("email"), request.reporter, request.assignee
+        )
+        memory = _memory.load_memory(self.settings, identities)
+        payload["user_context"] = _memory.render_for_prompt(memory)
+
+        # 6. Duplicate detection, scoped to this repository. This always runs: a
+        # reporter needs to know the work is already tracked even if the ticket also
+        # has fields missing, not discover it on the next resubmission.
+        from app.duplicate_detector import DuplicateVerdict
+
+        # A reviewer can overrule a duplicate block by putting this marker in the
+        # Jira description, which is the only channel available on the webhook path.
+        allow_duplicate = bool(
+            re.search(
+                r"\[(not[-\s]?a[-\s]?duplicate|allow[-\s]?duplicate)\]",
+                request.description or "",
+                re.IGNORECASE,
             )
-            model_output = {
-                "nature": "unsatisfied",
-                "llm_review": review_msg,
-                "priority": priority_val if priority_val in VALID_PRIORITIES else "P3",
-            }
-        else:
-            # All mandatory fields present -> Call LLM for Acceptance Criteria & Codebase Quality Review
-            try:
-                LOGGER.info("workflow1 step started: build_llm_prompt prompt_name=workflow1_prompt")
-                prompt = self._build_prompt(payload)
-                LOGGER.info("workflow1 step completed: build_llm_prompt length=%s", len(prompt))
-            except Exception:
-                LOGGER.exception("workflow1 step failed: build_llm_prompt")
-                raise
+        )
+        duplicate = self._check_duplicate(
+            summary=request.summary,
+            description=request.description,
+            repo=repo_url,
+            exclude_key=request.issueKey,
+            allow_duplicate=allow_duplicate,
+        )
+        if duplicate.action == "block":
+            missing_fields.append(
+                f"Duplicate of {duplicate.ticket_key}: this work is already tracked "
+                f"({duplicate.ticket_summary}). {duplicate.reasoning} "
+                f"If this is genuinely different work, add [not-a-duplicate] to the "
+                f"Jira description and it will be reviewed normally."
+            )
 
-            try:
-                LOGGER.info("workflow1 step started: call_claude_api model=claude-opus-4-5")
-                raw_llm_output = self._call_claude(prompt)
-                LOGGER.info("workflow1 step completed: call_claude_api length=%s", len(raw_llm_output))
-            except Exception:
-                LOGGER.exception("workflow1 step failed: call_claude_api")
-                raise
+        payload["duplicate_context"] = self._render_duplicate_context(duplicate)
+        payload["mandatory_findings"] = (
+            "\n".join(f"- {m}" for m in missing_fields)
+            if missing_fields
+            else "All mandatory fields are present and valid."
+        )
 
-            try:
-                LOGGER.info("workflow1 step started: parse_llm_output")
-                model_output = self._parse_llm_output(raw_llm_output)
-                LOGGER.info("workflow1 step completed: parse_llm_output nature=%s", model_output.get("nature"))
-            except Exception:
-                LOGGER.exception("workflow1 step failed: parse_llm_output")
-                raise
+        # 7. Quality review. This runs even when mandatory fields are already failing.
+        # Returning early meant the reporter fixed one thing, resubmitted, and was then
+        # told about the next thing - one defect per round trip. Every dimension is now
+        # assessed in a single pass and reported together.
+        llm_output: dict[str, str] | None = None
+        try:
+            LOGGER.info("workflow1 step started: build_llm_prompt prompt_name=workflow1_prompt")
+            prompt = self._build_prompt(payload)
+            LOGGER.info("workflow1 step completed: build_llm_prompt length=%s", len(prompt))
+            raw_llm_output = self._call_claude(prompt)
+            LOGGER.info("workflow1 step completed: call_claude_api length=%s", len(raw_llm_output))
+            llm_output = self._parse_llm_output(raw_llm_output)
+            LOGGER.info("workflow1 step completed: parse_llm_output nature=%s", llm_output.get("nature"))
+        except Exception as review_exc:
+            # A failed quality review must not discard the deterministic findings we
+            # already have, so this degrades instead of raising.
+            LOGGER.warning("workflow1 quality review unavailable for %s: %s", request.issueKey, review_exc)
+
+        model_output = self._consolidate_review(
+            issue_key=request.issueKey,
+            missing_fields=missing_fields,
+            llm_output=llm_output,
+            duplicate=duplicate,
+            fallback_priority=priority_val,
+        )
+        LOGGER.info(
+            "workflow1 consolidated verdict for %s: nature=%s blocking_issues=%d",
+            request.issueKey,
+            model_output["nature"],
+            len(missing_fields),
+        )
+
+        # Record this ticket so the next review of this user's work has continuity.
+        try:
+            _memory.record_ticket(
+                self.settings,
+                identifiers=identities,
+                ticket_key=request.issueKey,
+                summary=request.summary,
+                repo=repo_url or "",
+                review=model_output["llm_review"],
+                nature=model_output["nature"],
+            )
+            if identities:
+                _memory.update_summary(
+                    self.settings,
+                    identifier=identities[0],
+                    memory=_memory.load_memory(self.settings, identities),
+                )
+        except Exception as mem_exc:
+            LOGGER.warning("workflow1 could not update user memory for %s: %s", request.issueKey, mem_exc)
 
         try:
             LOGGER.info("workflow1 step started: find_slack_channel_ids")
@@ -231,8 +299,42 @@ class Workflow1Reviewer:
                     f"- Assessed Priority: `{model_output['priority']}`\n\n"
                     f"{model_output['llm_review']}"
                 )
-                sc.post_message(channel_id=target_channel, text=slack_msg)
+                # Re-reviews belong under the ticket's original Slack message, not as a
+                # new top-level post. Otherwise each edit to a ticket starts a fresh
+                # thread and the ticket's history is scattered across the channel.
+                existing_channel, existing_thread = self._existing_slack_thread(request.issueKey)
+                if existing_thread and existing_channel:
+                    target_channel = existing_channel
+                post_res = sc.post_message(
+                    channel_id=target_channel,
+                    text=slack_msg,
+                    thread_ts=existing_thread or None,
+                )
+                if existing_thread:
+                    LOGGER.info(
+                        "workflow1 posted review for %s into existing thread %s",
+                        request.issueKey,
+                        existing_thread,
+                    )
                 LOGGER.info("workflow1 posted Slack review to channel=%s", target_channel)
+                # The ts of this root message is the thread_ts of every follow-up
+                # reply. Without persisting it, workflow2 cannot map a Slack thread
+                # back to this ticket and answers with no context at all.
+                if post_res.sent:
+                    self._persist_thread_context(
+                        issue_key=request.issueKey,
+                        slack_channel_id=target_channel,
+                        slack_thread_ts=post_res.message_ts or post_res.thread_ts,
+                        llm_review=model_output["llm_review"],
+                        user_identifier=(
+                            reporter_match.email
+                            or assignee_match.email
+                            or request.reporter
+                            or request.assignee
+                        ),
+                        summary=request.summary,
+                        repo_url=repo_url or "",
+                    )
             else:
                 LOGGER.warning("workflow1 Slack notification skipped for %s: no Slack channel configured (set slack_channel_id in Settings)", request.issueKey)
         except Exception as exc:
@@ -246,6 +348,14 @@ class Workflow1Reviewer:
             "priority": model_output["priority"],
             "missing_fields": missing_fields,
             "github_repo": repo_url or "",
+            "duplicate": {
+                "is_duplicate": duplicate.is_duplicate,
+                "action": duplicate.action,
+                "ticket_key": duplicate.ticket_key,
+                "ticket_summary": duplicate.ticket_summary,
+                "confidence": duplicate.confidence,
+                "reasoning": duplicate.reasoning,
+            },
         }
         LOGGER.info("workflow1 completed with response: %s", self._to_log_json(response))
         return response
@@ -260,6 +370,7 @@ class Workflow1Reviewer:
             repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
 
             candidates = [
+                Path(self.settings.repo_clone_dir) / repo_name,
                 Path("workspace/repos") / repo_name,
                 Path(self.settings.repository_search_root or "/host-repos") / repo_name,
                 Path(self.settings.repository_host_root or "/host-repos") / repo_name,
@@ -350,7 +461,7 @@ class Workflow1Reviewer:
             try:
                 import subprocess
                 from pathlib import Path
-                clone_target = Path("workspace/repos") / repo_name
+                clone_target = Path(self.settings.repo_clone_dir) / repo_name
                 clone_target.parent.mkdir(parents=True, exist_ok=True)
                 if not clone_target.exists():
                     auth_url = repo_url
@@ -358,7 +469,19 @@ class Workflow1Reviewer:
                     if token and "github.com" in repo_url and not ("@" in repo_url):
                         auth_url = repo_url.replace("https://github.com/", f"https://x-access-token:{token}@github.com/")
                     LOGGER.info("Cloning new repository '%s' into workspace...", repo_name)
-                    subprocess.run(["git", "clone", "--depth", "1", auth_url, str(clone_target)], check=True, capture_output=True, timeout=60)
+                    # A 60s cap was rejecting large but perfectly valid repos (buzz,
+                    # ~474 files) as "inaccessible". Blobless clone keeps this fast
+                    # while the wider budget covers genuinely large histories.
+                    clone_timeout = self.settings.repo_clone_timeout_seconds
+                    subprocess.run(
+                        [
+                            "git", "clone", "--depth", "1", "--filter=blob:none",
+                            "--single-branch", auth_url, str(clone_target),
+                        ],
+                        check=True,
+                        capture_output=True,
+                        timeout=clone_timeout,
+                    )
                     LOGGER.info("Successfully cloned '%s' into workspace.", repo_name)
                 return {"connected": True, "name": repo_name, "status": "cloned"}
             except Exception as exc:
@@ -375,9 +498,158 @@ class Workflow1Reviewer:
         if not request.summary.strip():
             raise ValueError("summary is required")
 
+    def _existing_slack_thread(self, issue_key: str) -> tuple[str, str]:
+        """Channel and thread ts of this ticket's original Slack message, if any.
+
+        Returns ("", "") when the ticket has not been posted before, so the caller
+        starts a new thread for it.
+        """
+        if not self.settings.database_url or not issue_key:
+            return "", ""
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+
+            with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                row = conn.execute(
+                    """
+                    SELECT slack_channel_id, slack_thread_ts
+                    FROM tickets
+                    WHERE UPPER(jira_ticket_id) = UPPER(%s)
+                      AND slack_thread_ts IS NOT NULL
+                      AND TRIM(slack_thread_ts) <> ''
+                    LIMIT 1
+                    """,
+                    (issue_key,),
+                ).fetchone()
+            if row:
+                return str(row.get("slack_channel_id") or ""), str(row.get("slack_thread_ts") or "")
+        except Exception as exc:  # noqa: BLE001 - never block the Slack post
+            LOGGER.warning("Could not look up existing Slack thread for %s: %s", issue_key, exc)
+        return "", ""
+
+    def _consolidate_review(
+        self,
+        *,
+        issue_key: str,
+        missing_fields: list[str],
+        llm_output: dict[str, str] | None,
+        duplicate,
+        fallback_priority: str,
+    ) -> dict[str, str]:
+        """Merge every check into one verdict and one report.
+
+        The ticket is unsatisfied if ANY dimension fails - mandatory fields, the
+        quality review, or a confirmed duplicate - and the report always lists the
+        findings from every dimension. Previously the mandatory-field check returned
+        early, so a reporter fixed one thing, resubmitted, and only then heard about
+        the next: one defect per round trip. Everything is now surfaced at once.
+        """
+        llm_output = llm_output or {}
+        llm_nature = str(llm_output.get("nature") or "").strip().lower()
+        llm_review = str(llm_output.get("llm_review") or "").strip()
+        priority = str(llm_output.get("priority") or "").strip().upper()
+        if priority not in VALID_PRIORITIES:
+            priority = fallback_priority if fallback_priority in VALID_PRIORITIES else "P3"
+
+        failed = bool(missing_fields) or llm_nature == "unsatisfied" or duplicate.action == "block"
+        nature = "unsatisfied" if failed else "satisfied"
+
+        sections: list[str] = []
+        if failed:
+            sections.append("[AI Governor Quality Check: REJECTED (Unsatisfied)]")
+            sections.append(
+                f"Complete review of `{issue_key}`. Every issue found across all checks is "
+                f"listed below - please address all of them in a single update."
+            )
+        else:
+            sections.append("[AI Governor Quality Check: APPROVED (Satisfied)]")
+            sections.append(f"Complete review of `{issue_key}`. All checks passed.")
+
+        if missing_fields:
+            listed = "\n".join(f"- {m}" for m in missing_fields)
+            sections.append(f"Blocking issues ({len(missing_fields)}):\n{listed}")
+
+        if llm_review:
+            sections.append(f"Quality and codebase review:\n{llm_review}")
+        elif not llm_output:
+            sections.append(
+                "Quality and codebase review: could not be completed on this run because "
+                "the review service did not respond. The findings above still stand, and "
+                "the next update will be reviewed in full."
+            )
+
+        if duplicate.is_duplicate and duplicate.action != "block":
+            sections.append(duplicate.as_review_note())
+
+        if failed:
+            sections.append(
+                "Action Required: update the ticket in Jira addressing every point above. "
+                "The next review re-checks all of them together."
+            )
+
+        return {
+            "nature": nature,
+            "llm_review": "\n\n".join(s for s in sections if s),
+            "priority": priority,
+        }
+
+    def _check_duplicate(
+        self,
+        *,
+        summary: str,
+        description: str,
+        repo: str | None,
+        exclude_key: str | None,
+        allow_duplicate: bool = False,
+    ):
+        """Run duplicate detection, never letting a failure block a review."""
+        from app.duplicate_detector import DuplicateDetector, DuplicateVerdict
+
+        if not self.settings.duplicate_detection_enabled:
+            return DuplicateVerdict()
+        try:
+            return DuplicateDetector(self.settings).check(
+                summary=summary,
+                description=description,
+                repo=repo,
+                exclude_key=exclude_key,
+                allow_duplicate=allow_duplicate,
+            )
+        except Exception as exc:
+            LOGGER.warning("Duplicate detection failed (continuing without it): %s", exc)
+            return DuplicateVerdict()
+
+    @staticmethod
+    def _render_duplicate_context(verdict) -> str:
+        if not verdict.checked:
+            return "Duplicate check could not be completed. Do not draw any conclusion from this."
+        if not verdict.is_duplicate:
+            return (
+                f"No duplicate found. {verdict.candidates_considered} existing ticket(s) in the "
+                f"same repository were compared against this one."
+            )
+        label = "CONFIRMED DUPLICATE" if verdict.action == "block" else "POSSIBLE DUPLICATE"
+        return (
+            f"{label} of {verdict.ticket_key} (confidence {verdict.confidence:.0%}).\n"
+            f"Existing ticket: {verdict.ticket_summary} (status: {verdict.ticket_status or 'unknown'})\n"
+            f"Assessment: {verdict.reasoning}"
+        )
+
     def _build_prompt(self, payload: dict[str, Any]) -> str:
         prompt_template = self.prompt_store.load("workflow1_prompt")
-        return prompt_template.format(**payload)
+        # The template is formatted with str.format, so every placeholder must have a
+        # value or the whole review dies with KeyError. Default the optional context
+        # blocks here so a caller that does not supply them still works.
+        filled = {
+            "user_context": "No previous ticket history is on record for this user.",
+            "duplicate_context": "No duplicate check was performed.",
+            "mandatory_findings": "No automated field checks were run.",
+            "codebase_context": "No repository linked or accessible.",
+            "github_repo": "None provided",
+            **payload,
+        }
+        return prompt_template.format(**filled)
 
     def _call_claude(self, prompt: str) -> str:
         from app.llm_client import build_llm_client
@@ -640,6 +912,66 @@ class Workflow1Reviewer:
                 )
 
                 return ticket_id
+
+    def _persist_thread_context(
+        self,
+        *,
+        issue_key: str,
+        slack_channel_id: str,
+        slack_thread_ts: str,
+        llm_review: str,
+        user_identifier: str | None,
+        summary: str,
+        repo_url: str,
+    ) -> None:
+        """Map the Slack root message to this ticket and record it as the user's latest ticket.
+
+        Workflow2 resolves an incoming thread reply through tickets.slack_thread_ts,
+        jira_slack_conversations, or user_memory, in that order. Writing all three here
+        is what lets the bot answer follow-ups with the ticket and repo in context.
+        """
+        if not self.settings.database_url or not slack_thread_ts:
+            return
+        try:
+            import psycopg2
+            from psycopg2.extras import Json
+
+            with psycopg2.connect(self.settings.database_url) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE tickets
+                        SET slack_thread_ts = %s,
+                            slack_channel_id = COALESCE(%s, slack_channel_id)
+                        WHERE jira_ticket_id = %s
+                        """,
+                        (slack_thread_ts, slack_channel_id, issue_key),
+                    )
+                    cursor.execute(
+                        """
+                        INSERT INTO jira_slack_conversations (
+                            slack_thread_ts, slack_channel_id, issue_key, jira_issue_key, history
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (slack_thread_ts) DO UPDATE SET
+                            issue_key = EXCLUDED.issue_key,
+                            jira_issue_key = EXCLUDED.jira_issue_key,
+                            updated_at = NOW()
+                        """,
+                        (
+                            slack_thread_ts,
+                            slack_channel_id,
+                            issue_key,
+                            issue_key,
+                            Json([{"role": "assistant", "text": llm_review}]),
+                        ),
+                    )
+            # user_memory is written by app.user_memory.record_ticket during review,
+            # so it is deliberately not written again here.
+            LOGGER.info(
+                "workflow1 persisted thread context for %s (thread_ts=%s)", issue_key, slack_thread_ts
+            )
+        except Exception as exc:
+            LOGGER.warning("workflow1 could not persist thread context for %s: %s", issue_key, exc)
 
     def _insert_due_date_tracking_if_needed(
         self,

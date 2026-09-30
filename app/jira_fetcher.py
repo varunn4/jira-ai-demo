@@ -65,6 +65,66 @@ def _jira_get(path: str, params: Optional[dict] = None) -> dict[str, Any]:
     raise RuntimeError(f"Jira GET {path} failed after retries")
 
 
+def _known_project_keys() -> list[str]:
+    """Projects this deployment already holds tickets for.
+
+    The ticket-creation UI offers every Jira project, but sync was limited to
+    JIRA_PROJECT_KEYS. That let the app create a ticket in a project it would then
+    never read back: the ticket existed in Jira, was written to the cache once at
+    creation, and was never refreshed or joined by anything afterwards. Treating any
+    project we already have tickets for as in-scope keeps the two paths consistent,
+    whatever the allow-list says.
+    """
+    if not settings.database_url:
+        return []
+    excluded = _excluded_project_keys()
+    keys: list[str] = []
+    try:
+        with psycopg.connect(settings.database_url) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT UPPER(project_key) AS key
+                FROM jira_ticket_cache
+                WHERE project_key IS NOT NULL AND TRIM(project_key) <> ''
+                UNION
+                SELECT DISTINCT UPPER(SPLIT_PART(jira_ticket_id, '-', 1)) AS key
+                FROM tickets
+                WHERE jira_ticket_id LIKE '%-%'
+                """
+            ).fetchall()
+        for row in rows or []:
+            key = str(row[0] or "").strip()
+            if key and key not in excluded:
+                keys.append(key)
+    except Exception as exc:  # noqa: BLE001 - never let this break a sync
+        log.warning("Could not determine known project keys: %s", exc)
+    return keys
+
+
+def _sync_project_keys() -> list[str]:
+    """Projects to sync: the configured allow-list plus anything we already track.
+
+    An empty result means "discover everything the Jira user can browse", which is
+    the existing fallback behaviour.
+    """
+    configured = _configured_project_keys()
+    if not configured:
+        return []  # caller falls back to full project discovery
+
+    merged = list(configured)
+    seen = {k.upper() for k in merged}
+    for key in _known_project_keys():
+        if key.upper() not in seen:
+            seen.add(key.upper())
+            merged.append(key)
+            log.info(
+                "Project %s is not in JIRA_PROJECT_KEYS but has tickets in this "
+                "deployment; including it in sync",
+                key,
+            )
+    return merged
+
+
 def _configured_project_keys() -> list[str]:
     """Return configured Jira project keys, preserving order and removing duplicates."""
     keys: list[str] = []
@@ -423,7 +483,7 @@ def fetch_all_tickets(
     all_tickets: list[dict[str, Any]] = []
 
     with psycopg.connect(settings.database_url) as conn:
-        configured_keys = _configured_project_keys()
+        configured_keys = _sync_project_keys()
         if configured_keys:
             projects = _fetch_configured_projects(configured_keys)
             log.info(
@@ -579,7 +639,7 @@ def sync_recent_tickets(lookback_minutes: int = 10) -> int:
     if not settings.database_url or not _jira_credentials_are_valid():
         return 0
 
-    keys = _configured_project_keys()
+    keys = _sync_project_keys()
     if not keys:
         keys = [str(p["key"]) for p in _fetch_all_projects() if p.get("key")]
 

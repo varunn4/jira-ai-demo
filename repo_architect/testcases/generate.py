@@ -83,18 +83,29 @@ _BASE_RULES = dedent("""
       the architecture context. If the ticket asks for behavior the repo
       can't possibly satisfy (e.g., a route that doesn't exist), say so in a
       `## Gaps` section at the end — don't invent code.
-    - How many: generate only as many test cases as this specific ticket
-      genuinely needs — never pad to hit a number. Let the scope decide: a
-      small or simple change may need just 2-3 cases; a broad or risky one may
-      need more. Cap at a HARD MAXIMUM of 8 test cases — never exceed 8. Within
-      that budget, always cover the primary happy path, the edge cases that
-      actually matter for this change, and at least one reachable error/failure
-      case. If fewer than 8 cases fully cover the behavior, stop there; do not
-      invent low-value or redundant cases just to reach the maximum.
+    - How many: generate a MINIMUM of 8 and a MAXIMUM of 10 test cases. Fewer
+      than 8 means the change has not been thought through; more than 10 means
+      padding. Within that budget always cover the primary happy path, the edge
+      cases that actually matter for this change, and at least one reachable
+      error/failure case.
     - Authentication, authorization, validation, and persistence are common
       misses — include them when relevant.
-    - Be concrete: real payload values, real assertions. No placeholders like
-      "valid input" — say what valid input looks like.
+    - WRITE LIKE A WORKING QA ENGINEER, NOT LIKE A CHECKLIST. This is the rule
+      that matters most. A line such as "Invalid credentials - ensure proper
+      error response" is a topic heading, not a test case. It tells a tester
+      nothing they did not already know and catches nothing. Every case must be
+      executable by someone who has never read the ticket.
+    - Be concrete: real payload values, real assertions. Never a placeholder
+      like "valid input", "invalid data", "a bad token" or "appropriate error".
+      Write the literal value the tester types and the literal result they see:
+      the exact field values, the exact HTTP status, the exact error code and
+      message text, the exact row state after the action.
+    - Each case must name the specific thing it exercises, drawn from the repo
+      context: the route, handler, component, table or column. A case that
+      names nothing real is worthless.
+    - Steps are numbered actions a person or script performs, in order, with
+      the data to use at each step. Preconditions state the exact system and
+      data state required before step 1.
     - Do not write ambiguous expected results. Never use "OR", "either", or
       multiple acceptable status codes inside a test case's Expected result.
       If behavior is genuinely undecided, put it in `## Open Questions` or
@@ -109,7 +120,7 @@ _BASE_RULES = dedent("""
 
 _BUG_RULES = dedent("""
     Bug-ticket coverage (apply each only when it genuinely fits this bug, and
-    still respect the hard maximum of 8 cases):
+    still respect the 8 to 10 case budget):
     - Include one reproduction test for the current failing behavior.
     - Include one regression test proving the fix remains in place.
     - Include one fix-verification positive test.

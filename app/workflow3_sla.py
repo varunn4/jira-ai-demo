@@ -323,7 +323,10 @@ class Workflow3SLAChecker:
               s.alert_0_sent,
               t.slack_channel_id
             FROM sla_tracking s
-            JOIN tickets t ON s.ticket_id = t.id
+            -- Joined on the Jira key, not the surrogate id: sla_tracking.ticket_id is
+            -- TEXT while tickets.id is integer on deployed instances, which made this
+            -- join fail with "operator does not exist: text = integer".
+            LEFT JOIN tickets t ON UPPER(t.jira_ticket_id) = UPPER(s.jira_ticket_id)
             WHERE s.is_resolved = FALSE
             """
         )

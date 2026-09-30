@@ -180,6 +180,7 @@ class JiraClient:
         assignee_id: str | None = None,
         priority_name: str | None = None,
         github_repo_url: str | None = None,
+        estimated_time: str | None = None,
     ) -> dict[str, Any]:
         """Create a top-level Jira issue in Jira Cloud."""
         if not self.is_configured():
@@ -217,13 +218,114 @@ class JiraClient:
         if priority_name and priority_name.strip():
             payload["fields"]["priority"] = {"name": priority_name.strip()}
 
+        if estimated_time and estimated_time.strip():
+            payload["fields"]["timetracking"] = {"originalEstimate": estimated_time.strip()}
+
+        # Different projects expose different create screens. A team-managed project
+        # typically has no `priority` field and may not offer the `Task` issue type,
+        # which Jira answers with a bare 400. Ask the project what it actually accepts
+        # and strip anything it does not, rather than discovering it by failed POSTs.
+        self._conform_payload_to_project_schema(payload, project_key, issue_type)
+
         try:
             res = self._request("POST", "/rest/api/3/issue", json=payload)
             log.info("Created Jira ticket %s in project %s", res.get("key"), project_key)
             return res
         except Exception as exc:
+            log.warning("Initial ticket creation in %s failed: %s. Attempting schema-safe fallback...", project_key, exc)
+            # 1. Fallback: Try without custom priority if priority caused 400
+            if "priority" in payload.get("fields", {}):
+                fallback_payload = dict(payload)
+                fallback_payload["fields"] = dict(payload["fields"])
+                fallback_payload["fields"].pop("priority", None)
+                try:
+                    res = self._request("POST", "/rest/api/3/issue", json=fallback_payload)
+                    log.info("Created Jira ticket %s in %s (without explicit priority field)", res.get("key"), project_key)
+                    return res
+                except Exception as p_exc:
+                    log.warning("Priority fallback failed for %s: %s", project_key, p_exc)
+
+            # 2. Fallback: Try without assignee if assignee accountId is invalid
+            if "assignee" in payload.get("fields", {}):
+                fallback_payload = dict(payload)
+                fallback_payload["fields"] = dict(payload["fields"])
+                fallback_payload["fields"].pop("assignee", None)
+                fallback_payload["fields"].pop("priority", None)
+                try:
+                    res = self._request("POST", "/rest/api/3/issue", json=fallback_payload)
+                    log.info("Created Jira ticket %s in %s (without assignee/priority)", res.get("key"), project_key)
+                    return res
+                except Exception as a_exc:
+                    log.warning("Assignee fallback failed for %s: %s", project_key, a_exc)
+
             log.exception("Failed to create Jira ticket in %s: %s", project_key, exc)
             raise
+
+    def _conform_payload_to_project_schema(
+        self, payload: dict[str, Any], project_key: str, issue_type: str
+    ) -> None:
+        """Drop fields the target project's create screen does not accept.
+
+        Mutates payload in place. Any failure here is non-fatal: we fall back to
+        posting the payload as-is and let the retry ladder in create_ticket handle it.
+        """
+        try:
+            meta = self._request(
+                "GET",
+                "/rest/api/3/issue/createmeta",
+                params={
+                    "projectKeys": project_key.strip().upper(),
+                    "expand": "projects.issuetypes.fields",
+                },
+            )
+        except Exception as exc:
+            log.warning("createmeta lookup failed for %s (continuing unchecked): %s", project_key, exc)
+            return
+
+        projects = (meta or {}).get("projects") or []
+        if not projects:
+            log.warning("createmeta returned no schema for project %s; continuing unchecked", project_key)
+            return
+
+        issue_types = projects[0].get("issuetypes") or []
+        if not issue_types:
+            return
+
+        wanted = (issue_type or "Task").strip().lower()
+        matched = next((it for it in issue_types if str(it.get("name") or "").lower() == wanted), None)
+        if matched is None:
+            matched = issue_types[0]
+            log.warning(
+                "Issue type '%s' is not available in %s; falling back to '%s'",
+                issue_type,
+                project_key,
+                matched.get("name"),
+            )
+            payload["fields"]["issuetype"] = {"name": matched.get("name")}
+
+        allowed = set((matched.get("fields") or {}).keys())
+        if not allowed:
+            return
+
+        for field in ("priority", "assignee", "description"):
+            if field in payload["fields"] and field not in allowed:
+                log.info("Field '%s' is not on the create screen for %s; omitting it", field, project_key)
+                payload["fields"].pop(field, None)
+
+        # Priority values are per-scheme: "Medium" may simply not exist in this project.
+        priority_field = (matched.get("fields") or {}).get("priority") or {}
+        allowed_priorities = {
+            str(p.get("name") or "").lower() for p in (priority_field.get("allowedValues") or [])
+        }
+        requested = str((payload["fields"].get("priority") or {}).get("name") or "").lower()
+        if allowed_priorities and requested and requested not in allowed_priorities:
+            log.warning(
+                "Priority '%s' is not valid in %s (allowed: %s); omitting priority",
+                requested,
+                project_key,
+                sorted(allowed_priorities),
+            )
+            payload["fields"].pop("priority", None)
 
     def create_subtask(
         self,
@@ -304,6 +406,8 @@ class JiraClient:
         if response.status_code == 204:
             log.debug("Jira API %s %s → 204 No Content", method, path)
             return {"ok": True}
+        if response.status_code >= 400:
+            log.error("Jira API %s %s returned HTTP %d: %s", method, path, response.status_code, response.text)
         response.raise_for_status()
         log.debug("Jira API %s %s → %d", method, path, response.status_code)
         return response.json() if response.content else {"ok": True}

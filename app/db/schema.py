@@ -332,19 +332,22 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_jira_id ON tickets (jira_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_slack_thread ON tickets (slack_thread_ts);
 
 -- 24. Messages (Conversation History per Ticket)
 CREATE TABLE IF NOT EXISTS messages (
     id         BIGSERIAL PRIMARY KEY,
-    ticket_id  UUID REFERENCES tickets(id) ON DELETE CASCADE,
+    ticket_id  TEXT,
     sender     TEXT NOT NULL,
     message    TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_messages_ticket_id ON messages (ticket_id);
 
 -- 25. Channel ID Table (Slack User & Channel Mapping)
 CREATE TABLE IF NOT EXISTS channelid_table (
     slack_user_name TEXT PRIMARY KEY,
+    slack_user_id   TEXT,
     email_id        TEXT,
     channel_id      TEXT NOT NULL,
     role            TEXT,
@@ -355,7 +358,7 @@ CREATE TABLE IF NOT EXISTS channelid_table (
 -- 26. SLA Tracking
 CREATE TABLE IF NOT EXISTS sla_tracking (
     id                BIGSERIAL PRIMARY KEY,
-    ticket_id         UUID REFERENCES tickets(id) ON DELETE CASCADE,
+    ticket_id         TEXT,
     jira_ticket_id    TEXT UNIQUE NOT NULL,
     priority          TEXT,
     assignee_slack_id TEXT,
@@ -372,7 +375,7 @@ CREATE TABLE IF NOT EXISTS sla_tracking (
 -- 27. Due Date Tracking
 CREATE TABLE IF NOT EXISTS due_date_tracking (
     id                  BIGSERIAL PRIMARY KEY,
-    ticket_id           UUID REFERENCES tickets(id) ON DELETE CASCADE,
+    ticket_id           TEXT,
     jira_ticket_id      TEXT UNIQUE NOT NULL,
     priority            TEXT,
     assignee_slack_id   TEXT,
@@ -416,10 +419,65 @@ CREATE TABLE IF NOT EXISTS testcase_threads (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (slack_channel_id, slack_thread_ts)
 );
+
+-- 30. User Memory & Conversation Context Store
+CREATE TABLE IF NOT EXISTS user_memory (
+    id              SERIAL PRIMARY KEY,
+    user_identifier TEXT NOT NULL,
+    context_type    TEXT NOT NULL,
+    data            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_identifier, context_type)
+);
+CREATE INDEX IF NOT EXISTS idx_user_memory_user ON user_memory (user_identifier);
+
+-- 31. Ticket Creation Claims (concurrent duplicate guard)
+-- Duplicate detection reads committed rows, so two identical submissions racing
+-- each other both saw an empty result and both created a ticket. A claim is taken
+-- on (repository + normalised summary) before the check runs; the loser is told a
+-- matching request is already in flight. Rows are short-lived and self-expiring.
+CREATE TABLE IF NOT EXISTS ticket_creation_claims (
+    claim_key   TEXT PRIMARY KEY,
+    claimed_by  TEXT,
+    claimed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_claims_claimed_at ON ticket_creation_claims (claimed_at);
+
+-- 32. Effort Tracking (WF3 timeline clock + WF4 estimate review)
+-- Deliberately separate from sla_tracking so enabling SLA monitoring later cannot
+-- collide with estimate tracking; the two measure different clocks.
+CREATE TABLE IF NOT EXISTS effort_tracking (
+    id                  BIGSERIAL PRIMARY KEY,
+    jira_ticket_id      TEXT UNIQUE NOT NULL,
+    project_key         TEXT,
+    summary             TEXT,
+    assignee_name       TEXT,
+    assignee_slack_id   TEXT,
+    estimate_hours      NUMERIC,
+    predicted_hours     NUMERIC,
+    drift_pct           NUMERIC,
+    drift_flagged_at    TIMESTAMPTZ,
+    estimate_chased_at  TIMESTAMPTZ,
+    tracking_started_at TIMESTAMPTZ,
+    elapsed_hours       NUMERIC DEFAULT 0,
+    last_checkin_at     TIMESTAMPTZ,
+    alert_50_sent       BOOLEAN DEFAULT FALSE,
+    alert_25_sent       BOOLEAN DEFAULT FALSE,
+    alert_breached_sent BOOLEAN DEFAULT FALSE,
+    actual_hours        NUMERIC,
+    closed_at           TIMESTAMPTZ,
+    is_complete         BOOLEAN DEFAULT FALSE,
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_effort_tracking_open ON effort_tracking (is_complete, tracking_started_at);
+CREATE INDEX IF NOT EXISTS idx_effort_tracking_assignee ON effort_tracking (assignee_slack_id);
 """
 
 MIGRATIONS_SQL = """
 DO $$
+DECLARE
+    _tbl TEXT;
+    _con TEXT;
 BEGIN
     -- Add user_id / user_email columns to existing tables if missing
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'graph_jobs') THEN
@@ -438,6 +496,63 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'test_cases') THEN
         ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS phase VARCHAR(8) NOT NULL DEFAULT 'qa';
+    END IF;
+
+    -- Legacy ticket_id decoupling.
+    -- Older deployments created tickets.id as SERIAL (integer) while this schema
+    -- declares UUID, so any FK from messages/sla_tracking/due_date_tracking to
+    -- tickets(id) is either unbuildable or the wrong type. Workflow1/Workflow2 now
+    -- address rows by Jira key ("GOV-4") as well as by row id, so these columns are
+    -- plain TEXT with no FK. Drop the constraints and widen the columns in place.
+    FOR _tbl IN SELECT unnest(ARRAY['messages', 'sla_tracking', 'due_date_tracking']) LOOP
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = _tbl) THEN
+            FOR _con IN
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                WHERE rel.relname = _tbl AND con.contype = 'f'
+            LOOP
+                EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', _tbl, _con);
+            END LOOP;
+
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = _tbl AND column_name = 'ticket_id' AND data_type <> 'text'
+            ) THEN
+                EXECUTE format('ALTER TABLE %I ALTER COLUMN ticket_id TYPE TEXT USING ticket_id::text', _tbl);
+            END IF;
+        END IF;
+    END LOOP;
+
+    -- channelid_table had no column holding the Slack user id (only the display
+    -- name), so an inbound Slack event could not be resolved to the email that
+    -- user_memory is keyed by. Populate it to give workflow2 per-user memory.
+    -- The deployed table also predates display_name and jira_account_id, which this
+    -- schema declares; CREATE TABLE IF NOT EXISTS silently skipped them.
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'channelid_table') THEN
+        ALTER TABLE channelid_table ADD COLUMN IF NOT EXISTS slack_user_id TEXT;
+        ALTER TABLE channelid_table ADD COLUMN IF NOT EXISTS display_name TEXT;
+        ALTER TABLE channelid_table ADD COLUMN IF NOT EXISTS jira_account_id TEXT;
+        ALTER TABLE channelid_table ADD COLUMN IF NOT EXISTS email_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_channelid_slack_user_id ON channelid_table (slack_user_id);
+    END IF;
+
+    -- jira_slack_conversations had two conflicting definitions in this codebase
+    -- (app/db/schema.py used issue_key/history, app/conversation_store.py used
+    -- jira_issue_key/messages). Whichever ran first won, and the other side's
+    -- queries failed. Make both column sets present so either reader works.
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'jira_slack_conversations') THEN
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS issue_key TEXT;
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS jira_issue_key TEXT;
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS original_ticket_data JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS previous_review JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE jira_slack_conversations ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'open';
+        ALTER TABLE jira_slack_conversations ALTER COLUMN issue_key DROP NOT NULL;
+        ALTER TABLE jira_slack_conversations ALTER COLUMN jira_issue_key DROP NOT NULL;
+        UPDATE jira_slack_conversations SET issue_key = jira_issue_key WHERE issue_key IS NULL;
+        UPDATE jira_slack_conversations SET jira_issue_key = issue_key WHERE jira_issue_key IS NULL;
     END IF;
 END $$;
 """

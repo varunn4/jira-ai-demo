@@ -10,3 +10,32 @@ jira_ticket_exports
 jira_api_poc_outputs
 frontend/node_modules
 frontend/dist
+
+# Cloned repositories. These are runtime data, not source. Shipping them bloats the
+# build context and their symlinks/odd file modes break the tar checksum step.
+workspace/
+repo_tree/workspace/
+scratch/
+
+# Local state and artifacts that have no business in an image
+node_modules
+.claude
+.gemini
+.agents
+.cursor
+.vscode
+.idea
+docs/
+*.log
+*.pdf
+*.docx
+*.xlsx
+*.zip
+*.tar.gz
+ring_images/
+qdrant_storage/
+postgres_data/
+neo4j_data/
+*.sqlite
+*.sqlite3
+*.db

@@ -475,6 +475,7 @@ def create_jira_ticket(
     description = str(payload.get("description") or "").strip()
     issue_type = str(payload.get("issue_type") or "Task").strip()
     assignee_id = str(payload.get("assignee_id") or "").strip() or None
+    estimated_time = str(payload.get("estimated_time") or "").strip() or None
     # Map priority consistently: P0-P4 for AI Governor, Jira standard names for Jira API
     raw_priority = str(payload.get("priority") or "P2").strip().upper()
     priority_p_map = {
@@ -497,31 +498,62 @@ def create_jira_ticket(
     github_repo_url = str(payload.get("github_repo_url") or "").strip() or None
     pat = str(payload.get("github_pat") or "").strip() or None
 
-    # Format connected repository cleanly for LLM
-    if github_repo_url and not (github_repo_url.startswith("http://") or github_repo_url.startswith("https://") or "github.com" in github_repo_url):
-        repo_ref_for_eval = f"Connected Repository: {github_repo_url}"
-    else:
-        repo_ref_for_eval = github_repo_url or "None provided"
-
-    # 1. Basic Field Validation
-    if not summary or len(summary) < 5:
-        raise HTTPException(
-            status_code=400,
-            detail="Summary is required and must be at least 5 characters long.",
+    # The repository criterion is resolved deterministically here, not by the LLM.
+    # Leaving "is this a valid repo reference?" to the model made the same connected
+    # repo pass one run and get rejected the next for being "a name, not a URL".
+    is_url = bool(github_repo_url) and (
+        github_repo_url.startswith("http://")
+        or github_repo_url.startswith("https://")
+        or "github.com" in github_repo_url
+    )
+    if not github_repo_url:
+        repo_ref_for_eval = "None provided - this FAILS the repository criterion."
+    elif is_url:
+        repo_ref_for_eval = (
+            f"{github_repo_url} (VERIFIED: valid repository URL. "
+            f"The repository criterion is SATISFIED - do not question it.)"
         )
+    else:
+        repo_ref_for_eval = (
+            f"{github_repo_url} (VERIFIED: this is a connected workspace repository, "
+            f"already cloned and indexed by the AI Governor. The repository criterion is "
+            f"SATISFIED - do not reject this ticket for the repository being given as a "
+            f"name rather than a full URL.)"
+        )
+
+    # 1. Basic Field Validation. Every rule is evaluated and the failures are reported
+    # together: raising on the first one made the user fix a field, resubmit, and only
+    # then learn about the next - one defect per round trip.
+    basic_errors: list[str] = []
+    if not summary or len(summary) < 5:
+        basic_errors.append("Summary is required and must be at least 5 characters long.")
 
     if not description or len(description.strip()) < 15:
-        raise HTTPException(
-            status_code=400,
-            detail="Insufficient Context: The AI Governor requires a descriptive Technical Context (minimum 15 characters) to validate engineering requirements.",
+        basic_errors.append(
+            "Technical Context is required and must be at least 15 characters, so the "
+            "AI Governor can validate engineering requirements."
         )
 
-    # Validate that acceptance criteria / test scenarios are included
+    if not estimated_time:
+        basic_errors.append(
+            "Estimated Time / Original Estimate is required (e.g. '8h', '16h', '2d') "
+            "for AI Governor effort & timeline tracking."
+        )
+
     has_criteria = "Acceptance Criteria" in description or "Scenario" in description or "- [" in description
     if not has_criteria and len(description.strip()) < 30:
+        basic_errors.append(
+            "At least one Acceptance Criterion / Test Scenario is required for "
+            "requirements validation."
+        )
+
+    if basic_errors:
         raise HTTPException(
             status_code=400,
-            detail="Insufficient Context: At least one Acceptance Criterion / Test Scenario is required for AI Governor requirements validation.",
+            detail=(
+                "Insufficient Context - please fix all of the following:\n"
+                + "\n".join(f"- {e}" for e in basic_errors)
+            ),
         )
 
     # 2. Ensure Repository Connection & Extract Codebase Context
@@ -531,6 +563,49 @@ def create_jira_ticket(
 
     codebase_ctx = reviewer._get_codebase_context(github_repo_url, summary, description)
 
+    # 2b. User memory, so the governor's judgement stays consistent across this
+    # person's tickets instead of restarting from zero on every request.
+    from app import user_memory as _memory
+
+    identities = _memory.resolve_identities(settings, _user.email if _user else None)
+    memory = _memory.load_memory(settings, identities)
+
+    # 2c. Duplicate detection, scoped to this repository. The client re-submits with
+    # allow_duplicate after a human confirms the work is genuinely distinct.
+    allow_duplicate = bool(payload.get("allow_duplicate"))
+
+    # Two identical submissions arriving together would both see an empty duplicate
+    # result and both create a ticket. Claim the (repo + summary) first so the second
+    # one is rejected instead of racing through. Released in the finally below.
+    from app.duplicate_detector import CreationClaim
+
+    claim = CreationClaim(
+        settings,
+        repo=github_repo_url,
+        summary=summary,
+        actor=(_user.email if _user else "") or "unknown",
+    )
+    claim.__enter__()
+    if not claim.granted:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An identical ticket is already being created right now. "
+                "Wait a moment and check Jira before submitting again."
+            ),
+        )
+    duplicate = reviewer._check_duplicate(
+        summary=summary,
+        description=description,
+        repo=github_repo_url,
+        exclude_key=None,
+        allow_duplicate=allow_duplicate,
+    )
+
+    # A confirmed duplicate is handled after the quality review below, not here, so a
+    # blocked ticket still comes back with every other finding attached. Reporting the
+    # duplicate alone would send the user round the loop again for the rest.
+
     # 3. AI Governor Pre-Creation Gatekeeper Evaluation (Codebase Alignment & Quality)
     eval_payload = {
         "issueKey": "NEW-TICKET-DRAFT",
@@ -538,12 +613,15 @@ def create_jira_ticket(
         "description": description,
         "assignee": assignee_id or "Unassigned",
         "priority": priority_p,
+        "estimatedTime": estimated_time or "",
         "issueType": issue_type,
         "status": "Draft",
         "reporter": _user.email or "AI Governor",
         "dueDate": "",
         "github_repo": repo_ref_for_eval,
         "codebase_context": codebase_ctx,
+        "user_context": _memory.render_for_prompt(memory),
+        "duplicate_context": reviewer._render_duplicate_context(duplicate),
     }
 
     try:
@@ -556,6 +634,56 @@ def create_jira_ticket(
             "nature": "satisfied",
             "llm_review": "AI Governor auto-approved with baseline requirements.",
             "priority": priority_p,
+        }
+
+    # A weak duplicate match never blocks, but it must reach the human: surface it in
+    # the review text that the UI, the Jira comment and the Slack post all render.
+    if duplicate.action == "warn":
+        model_output["llm_review"] = f"{model_output['llm_review']}\n\n{duplicate.as_review_note()}"
+
+    # 3b. Confirmed duplicate. The quality review has now run, so the response carries
+    # the duplicate AND every other finding together - one complete report.
+    if duplicate.action == "block":
+        combined_review = f"{duplicate.as_review_note()}\n\n{model_output['llm_review']}".strip()
+        try:
+            slack_client = SlackClient(settings)
+            db_conf = get_all_settings(settings)
+            dup_channel = (
+                settings.governor_notify_channel_id
+                or db_conf.get("governor_notify_channel_id")
+                or settings.slack_default_channel_id
+                or db_conf.get("slack_default_channel_id")
+            )
+            if dup_channel:
+                slack_client.post_message(
+                    channel_id=dup_channel,
+                    text=(
+                        f"*AI Governor Duplicate Ticket Blocked*\n"
+                        f"- Attempted Summary: *{summary}*\n"
+                        f"- Repository: `{github_repo_url or 'None linked'}`\n"
+                        f"- Existing Ticket: `{duplicate.ticket_key}`\n\n"
+                        f"{combined_review}"
+                    ),
+                )
+        except Exception as slack_exc:
+            log.warning("Slack duplicate notice skipped: %s", slack_exc)
+
+        claim.__exit__()  # release the creation claim before returning
+        return {
+            "status": "duplicate",
+            "nature": "duplicate",
+            "review": combined_review,
+            "summary": summary,
+            "duplicate": {
+                "ticket_key": duplicate.ticket_key,
+                "ticket_summary": duplicate.ticket_summary,
+                "ticket_status": duplicate.ticket_status,
+                "confidence": duplicate.confidence,
+                "reasoning": duplicate.reasoning,
+                "url": f"{settings.jira_base_url.rstrip('/')}/browse/{duplicate.ticket_key}"
+                if settings.jira_base_url and duplicate.ticket_key
+                else "",
+            },
         }
 
     # 4. If AI Governor Rejects (Unsatisfied context / codebase misalignment):
@@ -583,6 +711,7 @@ def create_jira_ticket(
         except Exception as slack_exc:
             log.warning("Slack rejection notice skipped: %s", slack_exc)
 
+        claim.__exit__()  # release the creation claim before returning
         return {
             "status": "rejected",
             "nature": "unsatisfied",
@@ -608,6 +737,7 @@ def create_jira_ticket(
             assignee_id=assignee_id,
             priority_name=jira_priority,
             github_repo_url=github_repo_url,
+            estimated_time=estimated_time,
         )
         issue_key = created.get("key")
         if not issue_key:
@@ -671,6 +801,9 @@ def create_jira_ticket(
 
         # Broadcast Slack Governor Approval
         slack_notified = False
+        slack_msg_ts = None
+        target_channel = None
+        msg = ""
         try:
             slack_client = SlackClient(settings)
             db_conf = get_all_settings(settings)
@@ -693,9 +826,94 @@ def create_jira_ticket(
                 )
                 res = slack_client.post_message(channel_id=target_channel, text=msg)
                 slack_notified = res.sent
+                # The root message ts is the thread_ts every follow-up reply will carry.
+                if res.sent:
+                    slack_msg_ts = res.message_ts or res.thread_ts
         except Exception as slack_exc:
             log.warning("Slack approval broadcast failed: %s", slack_exc)
 
+        # Store thread mapping & User Memory into PostgreSQL
+        if settings.database_url and issue_key:
+            try:
+                import psycopg
+                from datetime import datetime, timezone
+                with psycopg.connect(settings.database_url) as conn:
+                    # 1. Update tickets table with slack thread and payload
+                    conn.execute(
+                        """
+                        INSERT INTO tickets (
+                            jira_ticket_id, email, assigned_user_id, slack_channel_id, slack_thread_ts, llm_review, status, jira_payload
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        ON CONFLICT (jira_ticket_id) DO UPDATE SET
+                            slack_channel_id = COALESCE(EXCLUDED.slack_channel_id, tickets.slack_channel_id),
+                            slack_thread_ts = COALESCE(EXCLUDED.slack_thread_ts, tickets.slack_thread_ts),
+                            llm_review = EXCLUDED.llm_review,
+                            status = EXCLUDED.status,
+                            jira_payload = EXCLUDED.jira_payload;
+                        """,
+                        (
+                            issue_key,
+                            _user.email if _user else None,
+                            assignee_id,
+                            target_channel if slack_notified else None,
+                            slack_msg_ts,
+                            model_output["llm_review"],
+                            "AI Approved",
+                            psycopg.types.json.Jsonb(created),
+                        ),
+                    )
+
+                    # 2. Update conversation thread mapping
+                    if slack_msg_ts and target_channel:
+                        conn.execute(
+                            """
+                            INSERT INTO jira_slack_conversations (
+                                slack_thread_ts, slack_channel_id, issue_key, jira_issue_key, history
+                            ) VALUES (
+                                %s, %s, %s, %s, %s
+                            )
+                            ON CONFLICT (slack_thread_ts) DO UPDATE SET
+                                issue_key = EXCLUDED.issue_key,
+                                jira_issue_key = EXCLUDED.jira_issue_key,
+                                updated_at = NOW();
+                            """,
+                            (
+                                slack_msg_ts,
+                                target_channel,
+                                issue_key,
+                                issue_key,
+                                psycopg.types.json.Jsonb([{"role": "assistant", "text": msg}]),
+                            ),
+                        )
+
+                    conn.commit()
+            except Exception as mem_exc:
+                log.warning("Could not persist thread mapping: %s", mem_exc)
+
+            # 3. User memory, via the shared store so the Jira webhook path and this
+            # one build the same history for the same person.
+            try:
+                _memory.record_ticket(
+                    settings,
+                    identifiers=identities or [(_user.email if _user else "") or "default_user"],
+                    ticket_key=issue_key,
+                    summary=summary,
+                    repo=github_repo_url or "",
+                    review=model_output["llm_review"],
+                    nature="satisfied",
+                )
+                if identities:
+                    _memory.update_summary(
+                        settings,
+                        identifier=identities[0],
+                        memory=_memory.load_memory(settings, identities),
+                    )
+            except Exception as mem_exc:
+                log.warning("Could not record ticket into user memory: %s", mem_exc)
+
+        claim.__exit__()  # release the creation claim before returning
         return {
             "status": "approved",
             "nature": "satisfied",
@@ -707,7 +925,9 @@ def create_jira_ticket(
             "review": model_output["llm_review"],
         }
     except HTTPException:
+        claim.__exit__()
         raise
     except Exception as exc:
+        claim.__exit__()
         log.exception("Ticket creation failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to create Jira ticket: {str(exc)}")

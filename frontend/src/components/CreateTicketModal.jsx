@@ -32,6 +32,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
   ]);
   const [assigneeId, setAssigneeId] = useState("");
   const [priority, setPriority] = useState("Medium");
+  const [estimatedTime, setEstimatedTime] = useState("");
   const [repoMode, setRepoMode] = useState("connected"); // "connected" | "custom"
   const [selectedRepo, setSelectedRepo] = useState("");
   const [customRepoUrl, setCustomRepoUrl] = useState("");
@@ -66,6 +67,32 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
 
   if (!isOpen) return null;
 
+  const resetForm = () => {
+    setSummary("");
+    setDescription("");
+    setCriteriaList(["Scenario 1: ", "Scenario 2: "]);
+    setCustomRepoUrl("");
+    setCustomPat("");
+    setError("");
+    setSuccess(null);
+    setGovernorReview(null);
+
+    // Selection fields reset to the same defaults the modal opens with, so a
+    // reopened form never carries the previous ticket's assignee or priority.
+    setIssueType("Task");
+    setPriority("Medium");
+    setAssigneeId("");
+    setEstimatedTime("");
+    setRepoMode("connected");
+    setProjectKey(context.projects?.[0]?.key || "SCRUM");
+    setSelectedRepo(context.connected_repositories?.[0] || "");
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
   const handleAddCriteria = () => {
     setCriteriaList([...criteriaList, ""]);
   };
@@ -84,21 +111,26 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
     setCriteriaList(criteriaList.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, { allowDuplicate = false } = {}) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!summary.trim() || summary.trim().length < 5) {
       setError("Please enter a descriptive ticket summary (at least 5 characters).");
       return;
     }
 
     if (!description.trim() || description.trim().length < 15) {
-      setError("⚠️ Insufficient Context: The AI Governor requires a descriptive Technical Context (minimum 15 characters) to validate requirements.");
+      setError("Insufficient Context: The AI Governor requires a descriptive Technical Context (minimum 15 characters) to validate requirements.");
+      return;
+    }
+
+    if (!estimatedTime.trim()) {
+      setError("Estimated Time is required: Enter an estimate like '8h', '16h', '2d', or '1w' so the AI Governor can track effort & timeline.");
       return;
     }
 
     const validCriteria = criteriaList.map((c) => c.trim()).filter(Boolean);
     if (validCriteria.length === 0 || validCriteria.every(c => c.length < 4)) {
-      setError("⚠️ Insufficient Context: Please provide at least one specific Acceptance Criterion / Test Scenario.");
+      setError("Insufficient Context: Please provide at least one specific Acceptance Criterion / Test Scenario.");
       return;
     }
 
@@ -130,10 +162,21 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
           issue_type: issueType,
           assignee_id: assigneeId || null,
           priority: priority,
+          estimated_time: estimatedTime.trim(),
           github_repo_url: repoUrl || null,
           github_pat: customPat.trim() || null,
+          allow_duplicate: allowDuplicate,
         },
       });
+
+      if (res.status === "duplicate") {
+        setGovernorReview({
+          status: "duplicate",
+          review: res.review,
+          duplicate: res.duplicate,
+        });
+        return;
+      }
 
       if (res.status === "rejected" || res.nature === "unsatisfied") {
         setGovernorReview({
@@ -156,8 +199,9 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
         onTicketCreated(res);
       }
       setTimeout(() => {
+        resetForm();
         onClose();
-      }, 4000);
+      }, 3500);
     } catch (err) {
       setError(err.message || "Failed to create ticket");
     } finally {
@@ -222,7 +266,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               background: "none",
               border: "none",
@@ -256,6 +300,70 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
           </div>
         )}
 
+        {/* Duplicate Ticket Banner */}
+        {governorReview && governorReview.status === "duplicate" && (
+          <div
+            style={{
+              padding: "14px 16px",
+              background: "rgba(239, 68, 68, 0.06)",
+              border: "1px solid rgba(239, 68, 68, 0.3)",
+              borderRadius: "8px",
+              marginBottom: "16px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#b91c1c", fontWeight: "700", fontSize: "13.5px", marginBottom: "6px" }}>
+              <WarningCircle size={18} weight="fill" />
+              <span>Duplicate Ticket - Not Created</span>
+            </div>
+            <div style={{ fontSize: "12.5px", color: "#334155", lineHeight: "1.5", whiteSpace: "pre-wrap" }}>
+              {governorReview.review}
+            </div>
+            {governorReview.duplicate && governorReview.duplicate.ticket_key && (
+              <div style={{ marginTop: "10px", fontSize: "12.5px" }}>
+                {governorReview.duplicate.url ? (
+                  <a
+                    href={governorReview.duplicate.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#1d4ed8", fontWeight: "600", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                  >
+                    Open {governorReview.duplicate.ticket_key}
+                    <ArrowSquareOut size={14} weight="bold" />
+                  </a>
+                ) : (
+                  <span style={{ fontWeight: "600", color: "#334155" }}>
+                    Existing ticket: {governorReview.duplicate.ticket_key}
+                  </span>
+                )}
+              </div>
+            )}
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
+              If this is genuinely different work, either clarify how it differs from the
+              existing ticket and submit again, or create it anyway.
+            </div>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => handleSubmit(null, { allowDuplicate: true })}
+              style={{
+                marginTop: "10px",
+                height: "34px",
+                padding: "0 14px",
+                background: "#fff",
+                border: "1px solid #b91c1c",
+                borderRadius: "6px",
+                color: "#b91c1c",
+                fontSize: "12.5px",
+                fontWeight: "600",
+                cursor: submitting ? "not-allowed" : "pointer",
+                opacity: submitting ? 0.6 : 1,
+              }}
+            >
+              {submitting ? "Creating..." : "Not a duplicate - create anyway"}
+            </button>
+          </div>
+        )}
+
         {/* AI Governor Rejection Banner */}
         {governorReview && governorReview.status === "rejected" && (
           <div
@@ -275,7 +383,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
               {governorReview.review}
             </div>
             <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
-              👉 Please update your technical description and acceptance criteria to match the connected repository, then submit again.
+              Please update your technical description and acceptance criteria to match the connected repository, then submit again.
             </div>
           </div>
         )}
@@ -319,7 +427,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
             )}
             {success.slack_notified && (
               <div style={{ fontSize: "11.5px", color: "#059669" }}>
-                ✓ AI Governor approval broadcasted to Slack Bot channel.
+                AI Governor approval broadcasted to Slack Bot channel.
               </div>
             )}
           </div>
@@ -477,8 +585,8 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
             </div>
           </div>
 
-          {/* Assignee & Priority */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          {/* Assignee, Priority & Estimated Time */}
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "12px" }}>
             <div>
               <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "var(--ink-soft, #334155)", marginBottom: "4px" }}>
                 Assignee *
@@ -512,6 +620,19 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
                 <option value="Low">P3 - Low</option>
                 <option value="Lowest">P4 - Lowest</option>
               </select>
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "var(--ink-soft, #334155)", marginBottom: "4px" }}>
+                Estimated Time *
+              </label>
+              <input
+                type="text"
+                value={estimatedTime}
+                onChange={(e) => setEstimatedTime(e.target.value)}
+                placeholder="e.g. 16h, 2d, 4h"
+                style={{ width: "100%", height: "38px", padding: "0 10px", borderRadius: "6px", border: "1px solid var(--line-strong, #cbd5e1)", fontSize: "13px", boxSizing: "border-box" }}
+              />
             </div>
           </div>
 
@@ -584,7 +705,7 @@ export default function CreateTicketModal({ isOpen, onClose, onTicketCreated }) 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               style={{
                 width: "auto",
                 height: "38px",

@@ -275,6 +275,23 @@ TEST_CASE_COMPARISON_PIPELINE_LIMIT=5
 TEST_CASE_COMPARISON_PIPELINE_TOP_K=15
 ```
 
+### 4.15 Effort Tracking (WF3b / WF4b)
+
+```env
+EFFORT_TRACKING_ENABLED=true
+EFFORT_START_STATUS=In Progress - Dev
+EFFORT_CLOSURE_STATUS=Done
+EFFORT_WORKING_HOURS_PER_DAY=8
+EFFORT_DRIFT_THRESHOLD_PCT=25
+EFFORT_CHECKIN_TIMEZONE=Asia/Kolkata
+EFFORT_GROUP_CHANNEL_ID=C1234567890
+EFFORT_DRIFT_LOG_ONLY=false
+```
+
+Status names are configurable because tracking runs across every project. Set
+`EFFORT_DRIFT_LOG_ONLY=true` to compute drift and log it without posting to Slack —
+recommended for the first few days until estimate quality is confirmed.
+
 ### 4.14 Documentation Generation Pricing
 
 ```env
@@ -829,6 +846,10 @@ The documentation portal lives at `/docs-portal` and supports generating four do
 | POST | `/workflow3/sla-check` | SLA monitoring check |
 | POST | `/workflow4/due-date-check` | Due-date compliance check |
 | POST | `/workflow4/aigov` | AI Governor due-date orchestration |
+| POST | `/workflow3/effort-check` | Effort timeline tracking + threshold alerts |
+| POST | `/workflow3/daily-checkin` | Daily 10:30 IST effort check-in to developers |
+| POST | `/workflow4/estimate-review` | Bot vs developer estimate drift review |
+| POST | `/workflow4/accuracy-report` | Weekly estimate-accuracy digest |
 | POST | `/workflow5/closing` | Ticket closing flow (test case generation) |
 | POST | `/workflow6/doc-review` | PRD/TechDoc review |
 | POST | `/workflow7/rft-estimate` | RFT estimate report |
@@ -942,6 +963,20 @@ The documentation portal lives at `/docs-portal` and supports generating four do
 **Trigger:** Scheduled every 15 minutes
 **Flow:** `POST /workflow4/aigov` → Scans active tickets → Checks due dates → Sends compliance digests to Jira owner and team leads
 **Status:** Live
+
+### WF3b — Effort & Timeline Tracking
+
+**Trigger:** Scheduled (hourly `/workflow3/effort-check`, daily 10:30 IST `/workflow3/daily-checkin`)
+**Flow:** Reconciles tickets in `In Progress - Dev` from the Jira cache → starts a clock against the developer's own Jira Original Estimate → alerts at 50% used, 25% remaining, and breach → daily check-in DM per developer
+**Measures:** Timeline adherence against the developer's own estimate. Never work quality.
+**Status:** Built, not yet enabled
+
+### WF4b — Estimate Review & Accuracy
+
+**Trigger:** Scheduled (hourly `/workflow4/estimate-review`, weekly `/workflow4/accuracy-report`)
+**Flow:** Compares the developer's Original Estimate against a team-calibrated LLM estimate → drift over `EFFORT_DRIFT_THRESHOLD_PCT` posts to the group channel → missing estimates chase the developer once → on `Done`, records actual vs estimate and feeds calibration
+**Note:** The developer is never notified about estimate drift; it goes to the group channel only.
+**Status:** Built, not yet enabled
 
 ### WF5 — Closing Flow (Phase-Aware)
 

@@ -35,4 +35,7 @@ COPY --from=frontend-builder /build/dist ./frontend/dist
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--ws", "wsproto"]
+# Bind to $PORT when the platform assigns one (Render, Heroku, Cloud Run all do),
+# falling back to 8000 for local docker-compose. Shell form is required so the
+# variable is expanded at runtime rather than passed through as a literal.
+CMD uvicorn api:app --host 0.0.0.0 --port "${PORT:-8000}" --ws wsproto

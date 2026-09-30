@@ -98,3 +98,58 @@ scripts/test_slack_message.py
 scripts/update_and_approve_scrum6.py
 test_*.py
 scratch/
+
+# ── Secrets & Credentials ─────────────────────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+certs/
+secrets/
+service-account*.json
+*credentials*.json
+token.json
+
+# ── Local Deploy & Compose Overrides ──────────────────────────────────────────
+docker-compose.override.yml
+docker-compose.*.local.yml
+.render/
+render.local.yaml
+
+# ── Editor Swap, Backup & Merge Artifacts ─────────────────────────────────────
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+*.tmp
+
+# ── Python Tooling & Notebooks ────────────────────────────────────────────────
+.tox/
+.nox/
+.cache/
+.ipynb_checkpoints/
+.python-version
+coverage.xml
+junit*.xml
+
+# ── Archives & Local Dumps ────────────────────────────────────────────────────
+*.zip
+*.tar
+*.tar.gz
+*.dump
+*.sql.gz
+pgdump*.sql
+
+frontend/.vite/
+frontend/coverage/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ── Temporary Analysis & Implementation Documentation ────────────────────────
+docs/WF1_WF2_ISSUE_ANALYSIS.md
+docs/WF1_WF2_STATUS.md
+docs/WF3_WF4_IMPLEMENTATION_PLAN.md
+frontend/DEPLOYMENT_GUIDE.md

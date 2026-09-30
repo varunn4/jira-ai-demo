@@ -3,6 +3,7 @@ Ticket ID: {issueKey}
 Summary: {summary}
 Description: {description}
 Assignee: {assignee}
+Estimated Time: {estimatedTime}
 Due Date: {dueDate}
 Priority: {priority}
 Issue Type: {issueType}
@@ -13,13 +14,45 @@ GitHub Repo: {github_repo}
 Connected Codebase Context:
 {codebase_context}
 
+User History & Prior Context:
+{user_context}
+
+Duplicate Check Result:
+{duplicate_context}
+
+Automated Field Checks Already Performed:
+{mandatory_findings}
+
+REVIEW EVERY CRITERION IN ONE PASS. This is the most important instruction here.
+- Assess ALL criteria below and report EVERY problem you find in a single review. Never stop at the first problem.
+- The automated field checks above have already run. Do not repeat them as your own findings, but do continue reviewing everything else even when they show failures. The reporter must be able to fix the entire ticket in one edit.
+- If the field checks show failures AND you find quality problems, report your quality problems anyway. Reporting one defect per round trip wastes the reporter's time and is the single worst outcome of this review.
+- In llm_review, enumerate each distinct issue on its own line, so every one is actionable.
+- If you find no problems in your criteria, say so plainly, even when the automated checks above have failures.
+
 Mandatory Quality & Codebase Alignment Criteria:
 1. Assignee: Must be assigned to a specific team member. If unassigned or empty, the ticket CANNOT be approved.
 2. Priority: Must have a valid priority set (P0, P1, P2, P3, or P4).
-3. GitHub Repository: A valid GitHub repository URL or linked repository must be provided.
-4. Summary & Description: Must be clear, descriptive, and outline the technical context.
-5. Acceptance Criteria: Must define clear, testable acceptance criteria or expected behavior.
-6. Codebase Alignment & Relevance: The ticket's summary and technical description MUST be relevant and applicable to the connected repository's actual codebase, domain, and architecture. If the description is irrelevant, disjoint, or incompatible with the codebase shown in the Connected Codebase Context above, you MUST mark the ticket as "unsatisfied" and explain the discrepancy.
+3. Estimated Time / Original Estimate: Must have a valid estimate provided (e.g., '4h', '8h', '16h', '2d', '1w'). If missing or empty, the ticket CANNOT be approved.
+4. GitHub Repository: A valid GitHub repository URL OR a connected workspace repository name (e.g. 'API-Debugger-FastAPI-Diagnostics-Backend' or 'buzz') must be provided. If a connected repository name is provided and codebase context is present, it is completely valid. Do not reject a ticket for providing a connected repository name instead of a full URL.
+5. Summary & Description: Must be clear, descriptive, and outline the technical context.
+6. Acceptance Criteria: Must define clear, testable acceptance criteria or expected behavior.
+7. Codebase Applicability: The work must be something that COULD be built in the connected repository. This is a sanity check against a wrong repository being linked, nothing more.
+
+CRITICAL - how to apply criterion 6. Read this carefully, it is the most misapplied rule:
+- New work does not exist in the codebase yet. That is what "new work" means. The ABSENCE of a feature is NEVER a reason to reject. If a ticket asks for a login flow and the repository has no authentication, that is a normal feature request, not a misalignment.
+- You are NOT a scope or roadmap reviewer. Never reject a ticket for being "out of scope for this project's purpose", "beyond the intended use of this repository", "not aligned with the project's goals", or for changing the nature of the codebase. What belongs in a repository is the team's decision, not yours.
+- Never suggest the ticket should target a different repository because the feature would be a new capability.
+- Reject under criterion 6 ONLY when the ticket plainly refers to a different system: it names components, services, screens, languages or frameworks that could not exist in this repository, or it describes a product this codebase is clearly not. Example of a genuine mismatch: a ticket about an iOS checkout screen linked to a Python CLI log parser.
+- If you are unsure whether it is a mismatch, treat criterion 6 as SATISFIED. A false rejection blocks real work and is far more damaging than letting a questionable ticket through.
+- Use the codebase context to make the review concrete and useful - name the modules the work would touch - not to police what the repository is allowed to become.
+
+How to use the history and duplicate sections:
+- Prior tickets are background to keep your judgement consistent across requests from the same person. They are NOT evidence for or against this ticket. A user whose earlier ticket was rejected is not more likely to be wrong now.
+- Use history to recognise continuity: if this ticket continues work described in a prior ticket, acknowledge that in your review.
+- If the Duplicate Check Result reports a confirmed duplicate, mark the ticket "unsatisfied", name the existing ticket key in llm_review, and state that the work is already tracked.
+- If it reports a possible duplicate, do NOT reject on that basis alone. Approve or reject on the normal criteria and mention the possible duplicate in llm_review so a human can confirm.
+- If it reports no duplicate, ignore the section entirely.
 
 Important due date rule:
 - Due date is intentionally left empty at ticket creation and will be filled later by the assignee after approval.
@@ -40,8 +73,10 @@ Rules:
 - Your entire response must start with {{ and end with }}.
 - Do not wrap the JSON in ```json or any other code block.
 - nature must be exactly "satisfied" or "unsatisfied".
-- Use "satisfied" ONLY when ALL mandatory fields are present (Assignee assigned, Priority set as P0-P4, GitHub repo linked), the ticket has clear technical acceptance criteria, AND the requirements are aligned with the connected repository.
-- Use "unsatisfied" if ANY mandatory item is missing: missing assignee, missing GitHub repo link, vague summary/description, lack of acceptance criteria, or lack of relevance/alignment with the codebase.
+- Use "satisfied" when ALL mandatory fields are present (Assignee assigned, Priority set as P0-P4, GitHub repo linked) and the ticket has clear technical acceptance criteria.
+- Use "unsatisfied" if ANY mandatory item is missing: missing assignee, missing GitHub repo link, vague summary/description, or lack of acceptance criteria.
+- Do NOT use "unsatisfied" because the feature does not exist in the codebase yet, because the work would add a new capability, or because you judge it out of scope for the repository. Rejecting new feature work on those grounds is always wrong.
+- When the only concern is applicability, and the work could plausibly be built in this repository, return "satisfied" and raise the concern as a note inside llm_review instead of blocking the ticket.
 - When "unsatisfied", in llm_review clearly and constructively list each missing item or alignment issue so the developer knows exactly what to edit in Jira.
 - Priority in response must strictly be one of: "P0", "P1", "P2", "P3", or "P4":
   - P0 - Critical: System down, data loss, security breach, affects all users.

@@ -143,6 +143,58 @@ class GraphTicketContext:
         return "\n".join(lines)[:max_chars]
 
 
+    def dependency_map(self, ticket: dict[str, Any], *, depth: int = 2, limit: int = 6) -> dict[str, Any]:
+        """Trace the call graph around the functions this ticket touches.
+
+        `context_for` only reports how many callers a function has. Test case
+        generation needs the actual chain: change a function and you must test both
+        what reaches it (callers, upstream) and what it relies on (callees,
+        downstream). This walks CALLS in both directions.
+        """
+        kws = extract_keywords(ticket)
+        if not kws:
+            return {"entrypoints": []}
+
+        # Cypher does not accept a parameter for a variable-length bound, so depth is
+        # clamped to a small int and inlined rather than bound.
+        hops = max(1, min(3, int(depth)))
+        rows = self._query(
+            "UNWIND $kws AS kw "
+            "MATCH (fn:Function) WHERE toLower(fn.name) CONTAINS kw "
+            "WITH DISTINCT fn LIMIT $limit "
+            f"OPTIONAL MATCH (caller:Function)-[:CALLS*1..{hops}]->(fn) "
+            f"OPTIONAL MATCH (fn)-[:CALLS*1..{hops}]->(callee:Function) "
+            "RETURN fn.name AS name, fn.repo AS repo, fn.file AS file, "
+            "  [c IN COLLECT(DISTINCT caller.name) WHERE c IS NOT NULL][0..8] AS callers, "
+            "  [c IN COLLECT(DISTINCT callee.name) WHERE c IS NOT NULL][0..8] AS callees",
+            kws=kws, limit=limit,
+        )
+        return {"entrypoints": rows}
+
+    def dependency_text_for(self, ticket: dict[str, Any], *, max_chars: int = 2000) -> str:
+        """Render the call graph as prompt text, empty when the graph has nothing."""
+        try:
+            dep = self.dependency_map(ticket)
+        except Exception:  # noqa: BLE001 - graph shape varies by build; never fail the caller
+            return ""
+
+        entries = [e for e in dep.get("entrypoints", []) if e.get("callers") or e.get("callees")]
+        if not entries:
+            return ""
+
+        lines = [
+            "Function dependency map (derived from the code graph). Changing a function "
+            "means testing both what calls it and what it depends on:"
+        ]
+        for e in entries:
+            lines.append(f"  {e['name']} ({e.get('repo')}/{e.get('file')})")
+            if e.get("callers"):
+                lines.append(f"    called by  : {', '.join(e['callers'])}")
+            if e.get("callees"):
+                lines.append(f"    depends on : {', '.join(e['callees'])}")
+        return "\n".join(lines)[:max_chars]
+
+
 def open_reader(cfg: GraphBuildConfig | None = None) -> GraphTicketContext | None:
     """Return a connected reader, or None if Neo4j is unconfigured/unreachable."""
     cfg = cfg or GraphBuildConfig.from_settings()

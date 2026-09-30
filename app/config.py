@@ -142,7 +142,7 @@ class Settings:
     jira_project_keys: str = os.getenv("JIRA_PROJECT_KEYS", "")
     jira_project_key: str = os.getenv("JIRA_PROJECT_KEYS", "")
     jira_excluded_project_keys: str = os.getenv("JIRA_EXCLUDED_PROJECT_KEYS", "")
-    jira_approved_transition_name: str = os.getenv("JIRA_APPROVED_TRANSITION_NAME", "")
+    jira_approved_transition_name: str = os.getenv("JIRA_APPROVED_TRANSITION_NAME", "Governor Approved")
 
     # Workflow4 batch alerts — Jira custom-field IDs for per-phase due dates.
     # Leave blank to fall back to the system `duedate` field.
@@ -163,7 +163,7 @@ class Settings:
     # matched here is treated as the Dev phase (the default).
     jira_qa_statuses: str = os.getenv(
         "JIRA_QA_STATUSES",
-        "ready for qa,ready to qa,in qa,in qa (staging),ready for preprod,in qa (preprod),qa in progress,in review",
+        "in review - qa,qa ready,ready for qa,ready to qa,in qa,in qa (staging),ready for preprod,in qa (preprod),qa in progress,in review",
     )
     jira_live_statuses: str = os.getenv(
         "JIRA_LIVE_STATUSES",
@@ -229,6 +229,34 @@ class Settings:
     jira_cache_ttl_hours: int = int(os.getenv("JIRA_CACHE_TTL_HOURS", "1"))
     jira_sync_interval_seconds: int = int(os.getenv("JIRA_SYNC_INTERVAL_SECONDS", "60"))
     similar_ticket_match_threshold: float = _similar_ticket_match_threshold()
+    # Workflow1 duplicate detection. A match at or above the block threshold stops
+    # ticket creation; between warn and block the ticket is created with the
+    # suspected duplicate attached to the review. Set block to 1.1 to never block.
+    duplicate_detection_enabled: bool = os.getenv("DUPLICATE_DETECTION_ENABLED", "true").lower() != "false"
+    duplicate_block_confidence: float = _threshold_from_env("DUPLICATE_BLOCK_CONFIDENCE", 0.85)
+    duplicate_warn_confidence: float = _threshold_from_env("DUPLICATE_WARN_CONFIDENCE", 0.60)
+
+    # Where Workflow1 clones repositories it needs for codebase context. On a platform
+    # with an ephemeral filesystem (Render without a mounted disk) point this at the
+    # mount path, or accept that clones are redone after every restart.
+    repo_clone_dir: str = os.getenv("REPO_CLONE_DIR", "workspace/repos")
+    # Seconds allowed for a clone. This runs inside the ticket-creation request, so on a
+    # platform with a proxy request timeout keep it comfortably below that limit.
+    repo_clone_timeout_seconds: int = int(os.getenv("REPO_CLONE_TIMEOUT_SECONDS", "300"))
+
+    # ── WF3/WF4 effort estimation & timeline tracking ────────────────────────
+    # Status names are configurable because this runs across every project and
+    # other projects may use different workflow names.
+    effort_tracking_enabled: bool = os.getenv("EFFORT_TRACKING_ENABLED", "true").lower() != "false"
+    effort_start_status: str = os.getenv("EFFORT_START_STATUS", "IN PROGRESS - DEV")
+    effort_closure_status: str = os.getenv("EFFORT_CLOSURE_STATUS", "DONE")
+    effort_working_hours_per_day: float = float(os.getenv("EFFORT_WORKING_HOURS_PER_DAY", "8"))
+    effort_drift_threshold_pct: float = float(os.getenv("EFFORT_DRIFT_THRESHOLD_PCT", "25"))
+    effort_checkin_timezone: str = os.getenv("EFFORT_CHECKIN_TIMEZONE", "Asia/Kolkata")
+    effort_group_channel_id: str = os.getenv("EFFORT_GROUP_CHANNEL_ID", "")
+    # Log-only mode: compute drift and log it, but do not post to the group channel.
+    # Recommended for the first few days until estimate quality is confirmed.
+    effort_drift_log_only: bool = os.getenv("EFFORT_DRIFT_LOG_ONLY", "false").lower() == "true"
     regression_match_threshold: float = _regression_match_threshold()
 
     # Authentication / RBAC

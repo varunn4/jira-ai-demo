@@ -85,6 +85,15 @@ class TestCaseGenerator:
             log.warning("Remote RepoTree generation failed (%s), falling back to direct LLM generation", exc)
             return self._generate_direct_llm(ticket_data, style, audience, repo=repo)
 
+    @staticmethod
+    def _identifiers_for(ticket_data: Dict[str, Any]) -> list:
+        """Identities to look up reporter memory under, in order of reliability."""
+        return [
+            str(ticket_data.get(k) or "").strip()
+            for k in ("email", "reporter", "assignee")
+            if str(ticket_data.get(k) or "").strip()
+        ]
+
     def _generate_direct_llm(
         self,
         ticket_data: Dict[str, Any],
@@ -114,19 +123,47 @@ class TestCaseGenerator:
                 audience=audience,
             )
 
-        system_prompt = (
-            f"You are an expert QA and Software Engineer. Generate comprehensive {audience.upper()} test cases "
-            f"for the provided Jira ticket in {style.upper()} format.\n"
-            f"Target Code Repository: {repo_name}\n"
-            f"Include positive functional test scenarios, edge cases, negative/error paths, and security/regression considerations.\n"
-            f"Format the output cleanly in standard markdown."
+        # Assemble every available context source at request time. Without this the
+        # model only ever sees the ticket text, which is why generated cases used to
+        # read as a restatement of the description instead of an analysis of the code.
+        from app import testcase_context as tc_context
+
+        context = tc_context.build(
+            self.settings,
+            ticket=ticket_data,
+            repo=repo,
+            identifiers=self._identifiers_for(ticket_data),
         )
+        fields = context.as_prompt_fields()
+
+        try:
+            from app.prompt_store import PromptStore
+
+            system_prompt = PromptStore(self.settings.prompt_dir).load("testcase_generation").format(
+                audience=audience.upper(),
+                style=style.upper(),
+                **fields,
+            )
+        except Exception as prompt_exc:
+            log.warning("testcase_generation prompt unavailable (%s); using inline fallback", prompt_exc)
+            system_prompt = (
+                f"You are a Senior QA Automation Engineer in the top 1% of your field. Generate "
+                f"{audience.upper()} test cases in {style.upper()} format, grounded in this system:\n"
+                f"{fields['repository_context']}\n{fields['codebase_context']}\n"
+                f"{fields['dependency_context']}\n"
+                f"Do not restate the ticket description. Cover positive flows, boundary validation, "
+                f"negative paths, mid-flow abandonment, UI state transitions, destructive actions, "
+                f"concurrency, and named regression risks. Never invent names that are not in the "
+                f"context above. Never use emojis."
+            )
+
         user_message = (
             f"Ticket: {key} ({issue_type})\n"
             f"Target Repository: {repo_name}\n"
             f"Summary: {summary}\n"
             f"Description:\n{desc}\n\n"
-            f"Please generate the complete test case suite in {style} style tailored for {audience}."
+            f"Generate the complete test case suite in {style} style for {audience}, "
+            f"derived from the system context rather than from the description text."
         )
         try:
             text = llm.complete(system_prompt=system_prompt, user_message=user_message)

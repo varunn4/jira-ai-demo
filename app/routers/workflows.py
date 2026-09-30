@@ -142,6 +142,34 @@ def workflow3_sla_check() -> Workflow3SLAResponse:
         raise HTTPException(status_code=500, detail=f"workflow3 failed: {exc}") from exc
 
 
+# ─── Workflow 3b: Effort & Timeline Tracking ────────────────────────────────
+# Distinct from SLA monitoring above: this clock measures a developer against
+# their own Jira Original Estimate, not against a priority-derived SLA window.
+
+@router.post("/workflow3/effort-check")
+def workflow3_effort_check() -> dict[str, Any]:
+    log.info("POST /workflow3/effort-check")
+    try:
+        from app.workflow3_effort_tracker import Workflow3EffortTracker
+
+        return Workflow3EffortTracker(settings=settings).run()
+    except Exception as exc:
+        log.exception("/workflow3/effort-check failed")
+        raise HTTPException(status_code=500, detail=f"effort-check failed: {exc}") from exc
+
+
+@router.post("/workflow3/daily-checkin")
+def workflow3_daily_checkin() -> dict[str, Any]:
+    log.info("POST /workflow3/daily-checkin")
+    try:
+        from app.workflow3_effort_tracker import Workflow3EffortTracker
+
+        return Workflow3EffortTracker(settings=settings).daily_checkin()
+    except Exception as exc:
+        log.exception("/workflow3/daily-checkin failed")
+        raise HTTPException(status_code=500, detail=f"daily-checkin failed: {exc}") from exc
+
+
 # ─── Workflow 4: Due Date & Compliance ───────────────────────────────────────
 
 @router.post("/workflow4", response_model=Workflow4DueDateResponse)
@@ -209,6 +237,32 @@ def workflow4_aigov_tl() -> AlertBatchResponse:
     except Exception as exc:
         log.exception("/workflow4/aigov/tl failed")
         raise HTTPException(status_code=500, detail=f"aigov workflow4/tl failed: {exc}") from exc
+
+
+# ─── Workflow 4b: Estimate Review & Accuracy ────────────────────────────────
+
+@router.post("/workflow4/estimate-review")
+def workflow4_estimate_review() -> dict[str, Any]:
+    log.info("POST /workflow4/estimate-review")
+    try:
+        from app.workflow4_estimate_review import Workflow4EstimateReview
+
+        return Workflow4EstimateReview(settings=settings).run()
+    except Exception as exc:
+        log.exception("/workflow4/estimate-review failed")
+        raise HTTPException(status_code=500, detail=f"estimate-review failed: {exc}") from exc
+
+
+@router.post("/workflow4/accuracy-report")
+def workflow4_accuracy_report() -> dict[str, Any]:
+    log.info("POST /workflow4/accuracy-report")
+    try:
+        from app.workflow4_estimate_review import Workflow4EstimateReview
+
+        return Workflow4EstimateReview(settings=settings).accuracy_report()
+    except Exception as exc:
+        log.exception("/workflow4/accuracy-report failed")
+        raise HTTPException(status_code=500, detail=f"accuracy-report failed: {exc}") from exc
 
 
 # ─── Governor Notify & Doc Review ────────────────────────────────────────────
@@ -367,15 +421,22 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
 
     slack_client = SlackClient(settings)
 
-    # 1. Check if the thread corresponds to an active Jira ticket in DB
-    ticket_found = False
-    if thread_ts:
+    # 1. Check if the thread corresponds to an active Jira ticket in DB.
+    # Top-level mentions are routed here too: the replier resolves a ticket from an
+    # explicit key in the text or from user memory, so "@AI Governor move gov-4 to
+    # In Dev" works without the user first being inside the ticket's thread.
+    import re as _re
+    mentions_ticket = bool(_re.search(r"(?i)\b[a-z][a-z0-9]+-\d+\b", text))
+    if thread_ts or mentions_ticket or event.get("type") == "app_mention":
+        # For a top-level mention there is no thread yet, so anchor the reply under
+        # the mention itself. The replier requires a non-empty thread ts.
+        reply_thread_ts = thread_ts or str(event.get("ts") or "")
         try:
-            store = PromptStore()
+            store = PromptStore(settings.prompt_dir)
             replier = Workflow2Replier(settings=settings, prompt_store=store)
             res = replier.reply(
                 Workflow2ReplyRequest(
-                    slack_thread_ts=thread_ts,
+                    slack_thread_ts=reply_thread_ts,
                     slack_channel_id=channel_id,
                     user_message=text,
                     user_id=user_id,
@@ -383,7 +444,9 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
             )
             bot_reply = str(res.get("reply") or "").strip()
             if bot_reply:
-                slack_client.post_message(channel_id=channel_id, text=bot_reply, thread_ts=thread_ts)
+                slack_client.post_message(
+                    channel_id=channel_id, text=bot_reply, thread_ts=reply_thread_ts
+                )
                 ticket_found = True
         except LookupError:
             ticket_found = False
@@ -398,7 +461,10 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
 
     # 2. Check if message references a Jira issue key like PROJ-123
     import re
-    jira_keys = re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", text)
+    # Case-insensitive: users type "scrum-29", not "SCRUM-29". The uppercase-only
+    # pattern silently missed those and dropped through to the generic chat fallback,
+    # which then claimed the ticket did not exist.
+    jira_keys = [m.upper() for m in re.findall(r"\b[A-Za-z][A-Za-z0-9]+-\d+\b", text)]
     if jira_keys:
         issue_key = jira_keys[0]
         log.info("Detected Jira ticket key in Slack message: %s", issue_key)
@@ -442,15 +508,33 @@ def _process_slack_event_async(event: dict[str, Any], team_id: str | None = None
                 import psycopg
                 from psycopg.rows import dict_row
                 with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
-                    rows = conn.execute(
-                        "SELECT ticket_key, summary, status, priority, assignee_name FROM jira_ticket_cache ORDER BY updated_at DESC NULLS LAST LIMIT 15"
-                    ).fetchall()
+                    # A freshly created ticket has no updated_at yet, so "ORDER BY
+                    # updated_at DESC NULLS LAST LIMIT 15" pushed it to the bottom and
+                    # off the list - and the prompt then told the model to answer only
+                    # from that list, producing "ticket not found" for a ticket that
+                    # plainly existed. Fall back through fetched_at/created_at instead.
+                    listing_sql = (
+                        "SELECT ticket_key, summary, status, priority, assignee_name "
+                        "FROM jira_ticket_cache "
+                        "ORDER BY COALESCE(updated_at, fetched_at, created_at) DESC NULLS LAST "
+                        "LIMIT 25"
+                    )
+                    rows = conn.execute(listing_sql).fetchall()
                     if not rows and settings.jira_base_url and settings.jira_email and settings.jira_api_token:
                         from app.jira_fetcher import fetch_all_tickets
                         fetch_all_tickets(force_refresh=True)
-                        rows = conn.execute(
-                            "SELECT ticket_key, summary, status, priority, assignee_name FROM jira_ticket_cache ORDER BY updated_at DESC NULLS LAST LIMIT 15"
+                        rows = conn.execute(listing_sql).fetchall()
+
+                    # Any ticket the user named explicitly must be in context even if it
+                    # falls outside the recent window.
+                    if jira_keys:
+                        named = conn.execute(
+                            "SELECT ticket_key, summary, status, priority, assignee_name "
+                            "FROM jira_ticket_cache WHERE UPPER(ticket_key) = ANY(%s)",
+                            (jira_keys,),
                         ).fetchall()
+                        have = {str(r["ticket_key"]).upper() for r in rows}
+                        rows = [r for r in named if str(r["ticket_key"]).upper() not in have] + list(rows)
                     if rows:
                         lines = [f"• *{r['ticket_key']}*: {r['summary']} — *{r['status'] or 'Open'}* (Assignee: {r['assignee_name'] or 'Unassigned'})" for r in rows]
                         jira_context = "\n\nLive Jira Tickets in Workspace:\n" + "\n".join(lines)
