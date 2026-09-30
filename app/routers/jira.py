@@ -860,8 +860,17 @@ def create_jira_ticket(
                             target_channel if slack_notified else None,
                             slack_msg_ts,
                             model_output["llm_review"],
-                            "AI Approved",
-                            psycopg.types.json.Jsonb(created),
+                            cache_status,
+                            psycopg.types.json.Jsonb({
+                                "key": issue_key,
+                                "summary": summary,
+                                "description": description,
+                                "github_repo": github_repo_url or "",
+                                "estimated_time": estimated_time or "",
+                                "priority": jira_priority,
+                                "status": cache_status,
+                                "created_raw": created,
+                            }),
                         ),
                     )
 

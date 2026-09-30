@@ -280,6 +280,164 @@ class Workflow2Replier:
             return "\n".join(lines)
         return None
 
+    def _fetch_single_jira_ticket(self, issue_key: str) -> dict[str, Any] | None:
+        """Fetch full ticket details directly from Jira Cloud REST API."""
+        try:
+            import re
+            from app.jira_client import JiraClient
+            from app.jira_graph import _adf_to_text
+
+            jc = JiraClient(self.settings)
+            if not jc.is_configured():
+                return None
+            issue = jc._request("GET", f"/rest/api/3/issue/{issue_key.strip().upper()}")
+            if not issue or not issue.get("fields"):
+                return None
+            fields = issue["fields"]
+            desc_raw = fields.get("description")
+            desc_str = _adf_to_text(desc_raw) if isinstance(desc_raw, dict) else str(desc_raw or "")
+            summary_str = str(fields.get("summary") or "")
+            status_str = str((fields.get("status") or {}).get("name") or "To Do")
+            assignee_str = str((fields.get("assignee") or {}).get("displayName") or "Unassigned")
+            priority_str = str((fields.get("priority") or {}).get("name") or "Medium")
+
+            repo_str = ""
+            repo_m = re.search(r"(?:Linked Repository|Repository):\s*(\S+)", desc_str, re.I)
+            if repo_m:
+                repo_str = repo_m.group(1).strip()
+
+            ticket_dict = {
+                "id": issue_key.upper(),
+                "jira_ticket_id": issue_key.upper(),
+                "ticket_key": issue_key.upper(),
+                "summary": summary_str,
+                "description": desc_str,
+                "status": status_str,
+                "priority": priority_str,
+                "assignee_name": assignee_str,
+                "github_repo": repo_str,
+                "llm_review": "",
+            }
+            # Cache it into PostgreSQL
+            if self.settings.database_url:
+                try:
+                    import psycopg
+                    with psycopg.connect(self.settings.database_url) as conn:
+                        conn.execute(
+                            """
+                            INSERT INTO jira_ticket_cache (ticket_key, project_key, summary, description, status, priority, updated_at, fetched_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                            ON CONFLICT (ticket_key) DO UPDATE SET summary = EXCLUDED.summary, description = EXCLUDED.description, status = EXCLUDED.status, priority = EXCLUDED.priority;
+                            """,
+                            (issue_key.upper(), issue_key.split("-")[0].upper(), summary_str, desc_str, status_str, priority_str),
+                        )
+                        conn.commit()
+                except Exception:
+                    pass
+            return ticket_dict
+        except Exception as exc:
+            LOGGER.warning("workflow2 live fetch for %s failed: %s", issue_key, exc)
+            return None
+
+    def _hydrate_ticket_context(self, ticket_key: str, conn: Any = None) -> dict[str, Any]:
+        """Load and merge complete ticket metadata from DB cache, tickets table, or live Jira Cloud."""
+        import re
+        t_key = ticket_key.strip().upper()
+        summary = ""
+        description = ""
+        status = "To Do"
+        priority = "Medium"
+        assignee_name = "Unassigned"
+        github_repo = ""
+        llm_review = ""
+        codebase_ctx = ""
+
+        if not conn and self.settings.database_url:
+            import psycopg
+            from psycopg.rows import dict_row
+            try:
+                with psycopg.connect(self.settings.database_url, row_factory=dict_row) as db_conn:
+                    return self._hydrate_ticket_context(t_key, conn=db_conn)
+            except Exception as exc:
+                LOGGER.warning("workflow2 db hydration connection error: %s", exc)
+
+        if conn:
+            try:
+                # 1. Look up tickets table
+                t_row = conn.execute(
+                    "SELECT id, jira_ticket_id, llm_review, status, jira_payload FROM tickets WHERE UPPER(jira_ticket_id) = %s",
+                    (t_key,),
+                ).fetchone()
+                if t_row:
+                    llm_review = t_row.get("llm_review") or ""
+                    status = t_row.get("status") or status
+                    payload = t_row.get("jira_payload") or {}
+                    if isinstance(payload, dict):
+                        summary = payload.get("summary") or summary
+                        description = payload.get("description") or description
+                        github_repo = payload.get("github_repo") or github_repo
+
+                # 2. Look up jira_ticket_cache table
+                cache_row = conn.execute(
+                    """
+                    SELECT ticket_key, summary, description, status, priority, assignee_name, data
+                    FROM jira_ticket_cache WHERE UPPER(ticket_key) = %s
+                    """,
+                    (t_key,),
+                ).fetchone()
+                if cache_row:
+                    summary = cache_row.get("summary") or summary
+                    description = cache_row.get("description") or description
+                    status = cache_row.get("status") or status
+                    priority = cache_row.get("priority") or priority
+                    assignee_name = cache_row.get("assignee_name") or assignee_name
+                    c_data = cache_row.get("data") or {}
+                    if isinstance(c_data, dict) and not github_repo:
+                        github_repo = c_data.get("github_repo") or ""
+            except Exception as exc:
+                LOGGER.warning("workflow2 db query error during hydration for %s: %s", t_key, exc)
+
+        # 3. If summary or description is missing, live query Jira Cloud REST API
+        if not summary or not description:
+            live_t = self._fetch_single_jira_ticket(t_key)
+            if live_t:
+                summary = live_t.get("summary") or summary
+                description = live_t.get("description") or description
+                status = live_t.get("status") or status
+                priority = live_t.get("priority") or priority
+                assignee_name = live_t.get("assignee_name") or assignee_name
+                if not github_repo:
+                    github_repo = live_t.get("github_repo") or ""
+
+        # 4. Extract repository from description if present
+        if not github_repo and description:
+            repo_m = re.search(r"(?:Linked Repository|Repository):\s*(\S+)", description, re.I)
+            if repo_m:
+                github_repo = repo_m.group(1).strip()
+
+        # 5. Extract Codebase Context for deep technical grounding and QA testcase generation
+        if github_repo and (summary or description):
+            try:
+                from app.workflow1_reviewer import Workflow1Reviewer
+                reviewer = Workflow1Reviewer(settings=self.settings, prompt_store=self.prompt_store)
+                codebase_ctx = reviewer._get_codebase_context(github_repo, summary, description)
+            except Exception as cb_exc:
+                LOGGER.warning("workflow2 codebase extraction skipped: %s", cb_exc)
+
+        return {
+            "id": t_key,
+            "jira_ticket_id": t_key,
+            "ticket_key": t_key,
+            "summary": summary,
+            "description": description,
+            "status": status,
+            "priority": priority,
+            "assignee_name": assignee_name,
+            "github_repo": github_repo,
+            "llm_review": llm_review,
+            "codebase_context": codebase_ctx,
+        }
+
     def _find_ticket(self, slack_thread_ts: str, user_message: str = "", user_id: str = "") -> dict[str, Any]:
         if not self.settings.database_url:
             raise RuntimeError("DATABASE_URL is required for workflow2")
@@ -288,21 +446,27 @@ class Workflow2Replier:
         import psycopg
         from psycopg.rows import dict_row
 
-        # 1. Search by slack_thread_ts in tickets table
         try:
             with psycopg.connect(self.settings.database_url, row_factory=dict_row) as conn:
+                # 1. Search for explicit ticket key in user message (e.g. GOV-5, SCRUM-27)
+                match = re.search(r"(?i)\b([a-zA-Z0-9]+-\d+)\b", user_message)
+                if match:
+                    t_key = match.group(1).upper()
+                    return self._hydrate_ticket_context(t_key, conn=conn)
+
+                # 2. Search by slack_thread_ts in tickets table
                 row = conn.execute(
                     """
-                    SELECT id, jira_ticket_id, llm_review, jira_payload
+                    SELECT jira_ticket_id
                     FROM tickets
                     WHERE slack_thread_ts = %s
                     """,
                     (slack_thread_ts,),
                 ).fetchone()
-                if row:
-                    return dict(row)
+                if row and row.get("jira_ticket_id"):
+                    return self._hydrate_ticket_context(row["jira_ticket_id"].upper(), conn=conn)
 
-                # 2. Search by slack_thread_ts in jira_slack_conversations
+                # 3. Search by slack_thread_ts in jira_slack_conversations
                 conv_row = conn.execute(
                     """
                     SELECT issue_key
@@ -312,42 +476,12 @@ class Workflow2Replier:
                     (slack_thread_ts,),
                 ).fetchone()
                 if conv_row and conv_row.get("issue_key"):
-                    t_key = conv_row["issue_key"].upper()
-                    t_row = conn.execute(
-                        "SELECT id, jira_ticket_id, llm_review, jira_payload FROM tickets WHERE UPPER(jira_ticket_id) = %s",
-                        (t_key,),
-                    ).fetchone()
-                    if t_row:
-                        return dict(t_row)
-                    return {"id": t_key, "jira_ticket_id": t_key, "llm_review": ""}
-
-                # 3. Search for explicit ticket key in user message (e.g. GOV-4, SCRUM-27)
-                match = re.search(r"(?i)\b([a-zA-Z0-9]+-\d+)\b", user_message)
-                if match:
-                    t_key = match.group(1).upper()
-                    t_row = conn.execute(
-                        "SELECT id, jira_ticket_id, llm_review, jira_payload FROM tickets WHERE UPPER(jira_ticket_id) = %s",
-                        (t_key,),
-                    ).fetchone()
-                    if t_row:
-                        return dict(t_row)
-                    # Check jira_ticket_cache
-                    cache_row = conn.execute(
-                        "SELECT ticket_key as jira_ticket_id, summary, description, status FROM jira_ticket_cache WHERE UPPER(ticket_key) = %s",
-                        (t_key,),
-                    ).fetchone()
-                    if cache_row:
-                        return dict(cache_row)
-                    return {"id": t_key, "jira_ticket_id": t_key, "llm_review": ""}
+                    return self._hydrate_ticket_context(conv_row["issue_key"].upper(), conn=conn)
 
                 # 4. Fall back to this user's own most recent ticket.
-                # Scoped to user_id: an unscoped "latest row" lookup handed one
-                # person's thread the context of somebody else's ticket.
                 if not user_id:
                     return {"id": "general", "jira_ticket_id": "General Ticket", "llm_review": ""}
 
-                # Slack sends a user id (U…), while the writers key user_memory by
-                # email. Accept either, resolving through channelid_table when it maps.
                 identifiers = [user_id.strip()]
                 try:
                     id_row = conn.execute(
@@ -373,8 +507,8 @@ class Workflow2Replier:
                     ([i.lower() for i in identifiers],),
                 ).fetchone()
                 if mem_row and mem_row.get("data") and mem_row["data"].get("last_ticket_key"):
-                    t_key = mem_row["data"]["last_ticket_key"]
-                    return {"id": t_key, "jira_ticket_id": t_key, "llm_review": ""}
+                    t_key = mem_row["data"]["last_ticket_key"].upper()
+                    return self._hydrate_ticket_context(t_key, conn=conn)
         except Exception as exc:
             LOGGER.warning("workflow2 _find_ticket lookup error: %s", exc)
 
@@ -458,15 +592,21 @@ class Workflow2Replier:
             t_summary = ticket_context.get("summary") or t_payload.get("summary") or ""
             t_desc = ticket_context.get("description") or t_payload.get("description") or ""
             t_repo = ticket_context.get("github_repo") or t_payload.get("github_repo") or ""
+            t_code = ticket_context.get("codebase_context") or ""
+            t_status = ticket_context.get("status") or t_payload.get("status") or ""
 
             context_header = (
                 f"\n\nContext of the Jira Ticket for this thread:\n"
                 f"- Ticket Key: {t_key}\n"
                 f"- Summary: {t_summary}\n"
+                f"- Status: {t_status}\n"
                 f"- Description: {t_desc}\n"
                 f"- Connected Repository: {t_repo}\n"
                 f"- Initial AI Review / Assessment:\n{t_rev}\n"
             )
+            if t_code:
+                context_header += f"\n- Relevant Codebase Files & Implementation Context:\n{t_code}\n"
+
             if t_key in {"N/A", "General Ticket", "general"}:
                 active_tickets = self._fetch_active_tickets_summary()
                 if active_tickets:
@@ -485,7 +625,11 @@ class Workflow2Replier:
             convo_lines.append(f"{sender}: {m.get('content', '')}")
         user_message = "\n\n".join(convo_lines) if convo_lines else "Hello"
 
-        return client.complete(system_prompt=full_system_prompt, user_message=user_message, max_tokens=1500).strip()
+        raw_reply = client.complete(system_prompt=full_system_prompt, user_message=user_message, max_tokens=2000).strip()
+        # Post-processing: enforce zero-emoji rule by stripping emoji Unicode blocks
+        import re
+        clean_reply = re.sub(r"[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf]", "", raw_reply).strip()
+        return clean_reply
 
     def _log_step(
         self,
