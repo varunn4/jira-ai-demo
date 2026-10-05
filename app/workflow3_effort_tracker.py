@@ -78,8 +78,7 @@ class Workflow3EffortTracker:
             from app.jira_client import JiraClient
             jc = JiraClient(self.settings)
             if jc.is_configured():
-                jql_statuses = ", ".join(f'"{s}"' for s in status_candidates)
-                jql = f'status in ({jql_statuses}) OR statusCategory = "In Progress"'
+                jql = 'statusCategory = "In Progress" OR status in ("In Progress - Dev", "In Progress", "In Dev")'
                 res = jc._request(
                     "GET",
                     "/rest/api/3/search/jql",
@@ -126,6 +125,11 @@ class Workflow3EffortTracker:
         # 3. Clean up non-existent / stale records dynamically from database
         try:
             with self.store._connect() as conn:
+                if in_dev:
+                    conn.execute(
+                        "UPDATE effort_tracking SET tracking_started_at = NULL WHERE UPPER(jira_ticket_id) != ALL(%s) AND tracking_started_at IS NOT NULL",
+                        (list(in_dev.keys()),),
+                    )
                 conn.execute(
                     """
                     DELETE FROM effort_tracking
