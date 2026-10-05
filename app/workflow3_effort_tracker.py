@@ -85,7 +85,20 @@ class Workflow3EffortTracker:
                 status_list,
             )
 
-        # Reset any tracked ticket that is no longer in the dev status.
+        # Reset any tracked ticket that no longer exists in Jira cache or left dev status
+        try:
+            with self.store._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE effort_tracking
+                    SET tracking_started_at = NULL, is_complete = TRUE
+                    WHERE UPPER(jira_ticket_id) NOT IN (SELECT UPPER(ticket_key) FROM jira_ticket_cache)
+                    """
+                )
+                conn.commit()
+        except Exception as cln_exc:
+            log.warning("workflow3 cleanup stale effort_tracking skipped: %s", cln_exc)
+
         for row in self.store.in_dev_rows():
             if str(row["jira_ticket_id"]).upper() not in in_dev:
                 self.store.reset_clock(row["jira_ticket_id"])

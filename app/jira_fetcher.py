@@ -507,20 +507,21 @@ def fetch_all_tickets(
             return []
 
         # When force refreshing, prune stale cached tickets for projects that no longer exist in Jira
-        if force_refresh and projects_dict:
-            valid_keys = list(projects_dict.keys())
-            try:
-                conn.execute(
-                    "DELETE FROM jira_ticket_cache WHERE UPPER(project_key) != ALL(%s)",
-                    (valid_keys,),
-                )
-                conn.execute(
-                    "DELETE FROM jira_projects WHERE UPPER(key) != ALL(%s)",
-                    (valid_keys,),
-                )
-                conn.commit()
-            except Exception as prune_exc:
-                log.debug("Cache pruning notice: %s", prune_exc)
+        if force_refresh and live_projects:
+            live_keys = [str(p.get("key", "")).upper() for p in live_projects if p.get("key")]
+            if live_keys:
+                try:
+                    conn.execute(
+                        "DELETE FROM jira_ticket_cache WHERE UPPER(project_key) != ALL(%s)",
+                        (live_keys,),
+                    )
+                    conn.execute(
+                        "DELETE FROM jira_projects WHERE UPPER(key) != ALL(%s)",
+                        (live_keys,),
+                    )
+                    conn.commit()
+                except Exception as prune_exc:
+                    log.debug("Cache pruning notice: %s", prune_exc)
 
         for project in projects:
             key = project["key"]
@@ -547,9 +548,22 @@ def fetch_all_tickets(
             try:
                 tickets = _fetch_tickets_for_project(key)
                 _upsert_tickets(conn, tickets)
+                # Prune tickets in cache that no longer exist in this project
+                live_t_keys = [str(t.get("key") or "") for t in tickets if t.get("key")]
+                if live_t_keys:
+                    conn.execute(
+                        "DELETE FROM jira_ticket_cache WHERE UPPER(project_key) = UPPER(%s) AND ticket_key != ALL(%s)",
+                        (key, live_t_keys),
+                    )
+                elif not tickets and force_refresh:
+                    conn.execute(
+                        "DELETE FROM jira_ticket_cache WHERE UPPER(project_key) = UPPER(%s)",
+                        (key,),
+                    )
             except ProjectGoneError as exc:
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
                 log.info("Project %s returned 410 (archived); skipping: %s", key, exc)
+                conn.execute("DELETE FROM jira_ticket_cache WHERE UPPER(project_key) = UPPER(%s)", (key,))
                 _log_fetch(conn, key, 0, from_cache=False,
                            force_refresh=force_refresh, duration_ms=elapsed_ms,
                            error="410 Gone – project is archived")
