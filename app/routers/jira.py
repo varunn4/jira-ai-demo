@@ -536,8 +536,8 @@ def create_jira_ticket(
 
     if not estimated_time:
         basic_errors.append(
-            "Estimated Time / Original Estimate is required (e.g. '8h', '16h', '2d') "
-            "for AI Governor effort & timeline tracking."
+            "Target TAT (Turnaround Time) / Original Estimate is required (e.g. '8h', '16h', '2d') "
+            "for AI Governor SLA and timeline tracking."
         )
 
     has_criteria = "Acceptance Criteria" in description or "Scenario" in description or "- [" in description

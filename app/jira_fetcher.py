@@ -483,23 +483,44 @@ def fetch_all_tickets(
     all_tickets: list[dict[str, Any]] = []
 
     with psycopg.connect(settings.database_url) as conn:
-        configured_keys = _sync_project_keys()
+        # 1. Discover all active accessible projects directly from Jira Cloud
+        live_projects = _fetch_all_projects()
+        configured_keys = _configured_project_keys()
+
+        projects_dict: dict[str, dict[str, Any]] = {
+            str(p.get("key", "")).upper(): p for p in live_projects if p.get("key")
+        }
         if configured_keys:
-            projects = _fetch_configured_projects(configured_keys)
-            log.info(
-                "Using %d configured Jira project key(s): %s",
-                len(configured_keys),
-                ", ".join(configured_keys),
+            for c_key in configured_keys:
+                if c_key.upper() not in projects_dict:
+                    try:
+                        p_meta = _fetch_project(c_key)
+                        projects_dict[c_key.upper()] = p_meta
+                    except Exception:
+                        projects_dict[c_key.upper()] = _project_stub(c_key)
+
+        projects = list(projects_dict.values())
+        if not projects:
+            log.warning(
+                "Jira project discovery returned 0 projects. Verify Jira credentials and permissions."
             )
-        else:
-            projects = _fetch_all_projects()
-            log.info("Found %d active Jira projects", len(projects))
-            if not projects:
-                log.warning(
-                    "Jira project discovery returned 0 projects. If the Jira user "
-                    "should only ingest selected projects, set JIRA_PROJECT_KEYS. "
-                    "Otherwise verify the API-token user has Browse Projects access."
+            return []
+
+        # When force refreshing, prune stale cached tickets for projects that no longer exist in Jira
+        if force_refresh and projects_dict:
+            valid_keys = list(projects_dict.keys())
+            try:
+                conn.execute(
+                    "DELETE FROM jira_ticket_cache WHERE UPPER(project_key) != ALL(%s)",
+                    (valid_keys,),
                 )
+                conn.execute(
+                    "DELETE FROM jira_projects WHERE UPPER(key) != ALL(%s)",
+                    (valid_keys,),
+                )
+                conn.commit()
+            except Exception as prune_exc:
+                log.debug("Cache pruning notice: %s", prune_exc)
 
         for project in projects:
             key = project["key"]
@@ -527,8 +548,6 @@ def fetch_all_tickets(
                 tickets = _fetch_tickets_for_project(key)
                 _upsert_tickets(conn, tickets)
             except ProjectGoneError as exc:
-                # Project is archived — already filtered at discovery, but
-                # catch it here as a fallback so one bad project can't abort the run.
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
                 log.info("Project %s returned 410 (archived); skipping: %s", key, exc)
                 _log_fetch(conn, key, 0, from_cache=False,

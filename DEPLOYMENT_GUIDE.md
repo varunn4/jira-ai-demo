@@ -956,7 +956,7 @@ The documentation portal lives at `/docs-portal` and supports generating four do
 
 **Trigger:** Scheduled (cron)
 **Flow:** `POST /workflow3/sla-check` → Checks SLA deadlines → Sends escalation alerts (75%/50%/25%/0%) to eng lead, CTO, CEO via Slack
-**Status:** Not live (enable when SLA tracking is configured)
+**Status:** Live & Operational
 
 ### WF4 — Due Date Compliance
 
@@ -966,17 +966,17 @@ The documentation portal lives at `/docs-portal` and supports generating four do
 
 ### WF3b — Effort & Timeline Tracking
 
-**Trigger:** Scheduled (hourly `/workflow3/effort-check`, daily 10:30 IST `/workflow3/daily-checkin`)
-**Flow:** Reconciles tickets in `In Progress - Dev` from the Jira cache → starts a clock against the developer's own Jira Original Estimate → alerts at 50% used, 25% remaining, and breach → daily check-in DM per developer
+**Trigger:** Scheduled (every 30 mins `/workflow3/effort-check`, daily 10:00 IST `/workflow3/daily-checkin`)
+**Flow:** Reconciles tickets in `IN PROGRESS - DEV` from Jira Cloud → starts a clock against the developer's own Jira Original Estimate → alerts at 50% used, 25% remaining, and breach → daily standup check-in card in Slack
 **Measures:** Timeline adherence against the developer's own estimate. Never work quality.
-**Status:** Built, not yet enabled
+**Status:** Live & Operational
 
 ### WF4b — Estimate Review & Accuracy
 
-**Trigger:** Scheduled (hourly `/workflow4/estimate-review`, weekly `/workflow4/accuracy-report`)
-**Flow:** Compares the developer's Original Estimate against a team-calibrated LLM estimate → drift over `EFFORT_DRIFT_THRESHOLD_PCT` posts to the group channel → missing estimates chase the developer once → on `Done`, records actual vs estimate and feeds calibration
-**Note:** The developer is never notified about estimate drift; it goes to the group channel only.
-**Status:** Built, not yet enabled
+**Trigger:** Scheduled (daily 11:00 IST `/workflow4/estimate-review`, weekly Friday 17:00 IST `/workflow4/accuracy-report`)
+**Flow:** Compares the developer's Original Estimate against a team-calibrated LLM estimate → drift over `EFFORT_DRIFT_THRESHOLD_PCT` posts to the team channel → on `DONE`, records actual vs estimate and generates weekly accuracy scorecard
+**Note:** The developer is never confronted about estimate drift; it goes to the group channel only.
+**Status:** Live & Operational
 
 ### WF5 — Closing Flow (Phase-Aware)
 

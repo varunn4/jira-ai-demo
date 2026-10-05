@@ -76,13 +76,13 @@ class Workflow1Reviewer:
             priority_val = JIRA_PRIORITY_TO_P.get(priority_val.upper(), priority_val)
             payload["priority"] = priority_val
 
-        # 2b. Estimated Time / Original Estimate Validation
+        # 2b. Target TAT (Turnaround Time) / Original Estimate Validation
         estimated_val = str(payload.get("estimatedTime") or payload.get("estimated_time") or "").strip()
         if not estimated_val:
-            # Check if Jira timetracking or description contains an estimate pattern
+            # Check if Jira timetracking or description contains an estimate or TAT pattern
             desc_text = request.description or ""
-            if "Original Estimate" not in desc_text and "Estimate:" not in desc_text:
-                missing_fields.append("Estimated Time / Original Estimate is required (e.g. '8h', '16h', '2d') for effort tracking.")
+            if not any(k in desc_text for k in ["Target TAT", "TAT:", "Original Estimate", "Estimate:"]):
+                missing_fields.append("Target TAT / Original Estimate is required (e.g. '8h', '16h', '2d') for SLA and effort tracking.")
         payload["estimatedTime"] = estimated_val or "Not provided"
 
         # 3. GitHub Repository Validation & Access Check

@@ -202,37 +202,19 @@ class Workflow2Replier:
         if not target_status:
             return None
 
-        jc = JiraClient(self.settings)
-        if not jc.is_configured():
-            return f"Jira credentials are not configured to transition ticket *{issue_key}*."
-
-        try:
-            res = jc.transition_to(issue_key, target_status)
-            if res.get("success"):
-                final_to_status = res.get("to_status") or target_status
-                # Update local cache and tickets table
-                if self.settings.database_url:
-                    try:
-                        import psycopg
-                        with psycopg.connect(self.settings.database_url) as conn:
-                            conn.execute(
-                                "UPDATE jira_ticket_cache SET status = %s WHERE UPPER(ticket_key) = %s",
-                                (final_to_status, issue_key.upper()),
-                            )
-                            conn.execute(
-                                "UPDATE tickets SET status = %s WHERE UPPER(jira_ticket_id) = %s",
-                                (final_to_status, issue_key.upper()),
-                            )
-                            conn.commit()
-                    except Exception:
-                        pass
-                return f"Status for ticket *{issue_key}* has been updated to *{final_to_status}* in Jira Cloud."
-            else:
-                reason = res.get("reason") or "Transition not allowed in current Jira workflow state"
-                return f"Could not transition *{issue_key}* to *{target_status}*: {reason}."
-        except Exception as exc:
-            LOGGER.warning("Direct status transition failed for %s: %s", issue_key, exc)
-            return f"Failed to transition *{issue_key}* to *{target_status}*: {str(exc)}."
+        # Scope clarification: Direct status updates from Slack back to Jira are disabled.
+        # Jira remains the single source of truth for ticket status changes.
+        # jc = JiraClient(self.settings)
+        # if not jc.is_configured():
+        #     return f"Jira credentials are not configured to transition ticket *{issue_key}*."
+        # try:
+        #     res = jc.transition_to(issue_key, target_status)
+        #     ...
+        return (
+            f"Direct ticket status updates via Slack are disabled. "
+            f"Jira remains the single source of truth for ticket status changes. "
+            f"Please update the status for *{issue_key}* (to *{target_status}*) directly in Jira Cloud."
+        )
 
     def _fetch_active_tickets_summary(self) -> list[dict[str, Any]]:
         """Fetch real Jira tickets from the local PostgreSQL cache or live sync."""
@@ -253,7 +235,7 @@ class Workflow2Replier:
                 if not rows:
                     try:
                         from app import jira_fetcher
-                        jira_fetcher.fetch_all_tickets(force=True)
+                        jira_fetcher.fetch_all_tickets(force_refresh=True)
                         rows = conn.execute(
                             """
                             SELECT ticket_key, summary, status, assignee_name, priority

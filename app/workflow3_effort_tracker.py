@@ -197,26 +197,81 @@ class Workflow3EffortTracker:
         remaining = max(0.0, estimate - elapsed)
         key = row["jira_ticket_id"]
         summary = row.get("summary") or ""
+        status_tag = "[RED]" if pct >= 100.0 else ("[YELLOW]" if pct >= 75.0 else "[GREEN]")
+        
         headline = {
-            "50_USED": f"*{key}* - half of your estimate is used",
-            "25_REMAINING": f"*{key}* - 25% of your estimate remains",
-            "BREACHED": f"*{key}* - your estimate is fully used",
+            "50_USED": f"{status_tag} *{key}* - 50% of Target TAT utilized",
+            "25_REMAINING": f"{status_tag} *{key}* - 25% of Target TAT remaining (75% utilized)",
+            "BREACHED": f"{status_tag} *{key}* - Target TAT SLA Breached (>100% elapsed)",
         }[level]
+        
         body = (
             f"{headline}\n"
             f"- Summary: {summary}\n"
-            f"- Your estimate: {estimate:g} h\n"
-            f"- Used: {elapsed:g} h ({pct:.0f}%)\n"
-            f"- Remaining: {remaining:g} h"
+            f"- Target TAT: {estimate:g} h\n"
+            f"- Elapsed Time: {elapsed:g} h ({pct:.0f}% of TAT)\n"
+            f"- Remaining TAT: {remaining:g} h"
         )
         if level == "BREACHED":
-            body += "\n\nThis tracks timeline against your own estimate, not the quality of the work."
+            breached_by = max(0.0, elapsed - estimate)
+            body += f"\n- SLA Overrun: +{breached_by:g} h over Target TAT"
+            body += "\n\nNote: This tracks SLA adherence against the agreed Target TAT, not code quality."
         return body
 
-    # ── daily check-in ───────────────────────────────────────────────────────
+    # ── 9:00 AM: Individual Developer Check-in ────────────────────────────────
 
-    def daily_checkin(self) -> dict[str, Any]:
-        """Post a consolidated team standup digest to Slack and individual DMs."""
+    def daily_dev_checkin(self) -> dict[str, Any]:
+        """9:00 AM: Send each developer an individual status update on their active tickets."""
+        if not self.settings.effort_tracking_enabled:
+            return {"skipped": "EFFORT_TRACKING_ENABLED is false", "messages_sent": 0}
+
+        now = datetime.now(timezone.utc)
+        hours_per_day = self.settings.effort_working_hours_per_day
+        rows = self.store.in_dev_rows()
+        if not rows:
+            self._reconcile()
+            rows = self.store.in_dev_rows()
+
+        if not rows:
+            return {"messages_sent": 0, "tickets": 0, "detail": "No tickets currently in dev status"}
+
+        group_channel = self._resolve_group_channel_id()
+        by_dev: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            channel = r.get("assignee_slack_id") or group_channel
+            if channel:
+                elapsed = elapsed_working_hours(r["tracking_started_at"], now, hours_per_day)
+                by_dev.setdefault(channel, []).append({**r, "_elapsed": elapsed})
+
+        sent = 0
+        for channel, dev_rows in by_dev.items():
+            dev_name = dev_rows[0].get("assignee_name") or "Developer"
+            dm_lines = [
+                f"To: *{dev_name}*",
+                "*Daily Dev TAT & Ticket Status Update (9:00 AM IST)*"
+            ]
+            for r in dev_rows:
+                estimate = float(r.get("estimate_hours") or 8.0)
+                remaining = max(0.0, estimate - r["_elapsed"])
+                pct = percentage_used(r["_elapsed"], estimate)
+                status_tag = "[RED]" if pct >= 100.0 else ("[YELLOW]" if pct >= 75.0 else "[GREEN]")
+                dm_lines.append(
+                    f"- {status_tag} *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
+                    f"  Elapsed: `{r['_elapsed']:g}h` of `{estimate:g}h` Target TAT ({remaining:g}h remaining, {pct:.0f}% used)"
+                )
+            dm_lines.append("\nAre you on track to deliver within the Target TAT today, or is an SLA extension required?")
+            if self._post([channel], "\n".join(dm_lines)):
+                sent += 1
+                for r in dev_rows:
+                    self.store.upsert(r["jira_ticket_id"], last_checkin_at=now)
+
+        log.info("workflow3 9AM dev check-in: %d messages sent across %d tickets", sent, len(rows))
+        return {"messages_sent": sent, "tickets": len(rows), "scope": "developer_9am_dm"}
+
+    # ── 3:00 PM: Combined TL & Management Summary ───────────────────────────
+
+    def daily_tl_summary(self) -> dict[str, Any]:
+        """3:00 PM: Send combined developer status digest to Team Lead & Management."""
         if not self.settings.effort_tracking_enabled:
             return {"skipped": "EFFORT_TRACKING_ENABLED is false", "messages_sent": 0}
 
@@ -232,10 +287,10 @@ class Workflow3EffortTracker:
         if not rows:
             return {"messages_sent": 0, "tickets": 0, "detail": "No tickets currently in dev status"}
 
-        # 1. Post team-level standup digest to the team channel
         lines = [
-            "*AI Governor Daily Dev Standup Check-in*",
-            f"Active Tickets in Development ({len(rows)}):"
+            "To: Team Lead & Engineering Management",
+            "*AI Governor Team Dev Status & TAT Adherence (3:00 PM IST)*",
+            f"Active In-Dev Tickets across Developers ({len(rows)}):"
         ]
         for r in rows:
             elapsed = elapsed_working_hours(r["tracking_started_at"], now, hours_per_day)
@@ -243,11 +298,12 @@ class Workflow3EffortTracker:
             remaining = max(0.0, estimate - elapsed)
             pct = percentage_used(elapsed, estimate)
             assignee = r.get("assignee_name") or "Unassigned"
+            status_tag = "[RED]" if pct >= 100.0 else ("[YELLOW]" if pct >= 75.0 else "[GREEN]")
             lines.append(
-                f"- *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
-                f"  Assignee: *{assignee}* | Estimate: `{estimate:g}h` | Elapsed: `{elapsed:g}h` ({pct:.0f}%) | Remaining: `{remaining:g}h`"
+                f"- {status_tag} *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
+                f"  Assignee: *{assignee}* | Target TAT: `{estimate:g}h` | Elapsed: `{elapsed:g}h` ({pct:.0f}% of TAT) | Remaining TAT: `{remaining:g}h`"
             )
-        lines.append("\nPlease reply in thread if there are any blockers or architectural hurdles.")
+        lines.append("\nPlease reply in thread if there are any team blockers or if management intervention is required.")
 
         sent = 0
         if group_channel and self._post([group_channel], "\n".join(lines)):
@@ -255,28 +311,19 @@ class Workflow3EffortTracker:
             for r in rows:
                 self.store.upsert(r["jira_ticket_id"], last_checkin_at=now)
 
-        # 2. Also message individual developers if known
-        by_dev: dict[str, list[dict[str, Any]]] = {}
-        for r in rows:
-            channel = r.get("assignee_slack_id")
-            if channel and channel != group_channel:
-                elapsed = elapsed_working_hours(r["tracking_started_at"], now, hours_per_day)
-                by_dev.setdefault(channel, []).append({**r, "_elapsed": elapsed})
+        log.info("workflow3 3PM TL summary: %d messages sent across %d tickets", sent, len(rows))
+        return {"messages_sent": sent, "tickets": len(rows), "group_channel": group_channel, "scope": "tl_3pm_summary"}
 
-        for channel, dev_rows in by_dev.items():
-            dm_lines = ["*Your Daily Effort Check-in*"]
-            for r in dev_rows:
-                estimate = float(r.get("estimate_hours") or 8.0)
-                remaining = max(0.0, estimate - r["_elapsed"])
-                dm_lines.append(
-                    f"- *{r['jira_ticket_id']}*: {r['_elapsed']:g}h used of {estimate:g}h ({remaining:g}h remaining)"
-                )
-            dm_lines.append("\nAre you on track?")
-            if self._post([channel], "\n".join(dm_lines)):
-                sent += 1
-
-        log.info("workflow3 daily check-in: %d messages sent across %d tickets", sent, len(rows))
-        return {"messages_sent": sent, "tickets": len(rows), "group_channel": group_channel}
+    def daily_checkin(self) -> dict[str, Any]:
+        """Consolidated daily check-in (triggers both 9AM dev and 3PM TL formats)."""
+        dev_res = self.daily_dev_checkin()
+        tl_res = self.daily_tl_summary()
+        return {
+            "messages_sent": dev_res.get("messages_sent", 0) + tl_res.get("messages_sent", 0),
+            "tickets": dev_res.get("tickets", 0),
+            "dev_checkin": dev_res,
+            "tl_summary": tl_res,
+        }
 
     # ── closure ──────────────────────────────────────────────────────────────
 

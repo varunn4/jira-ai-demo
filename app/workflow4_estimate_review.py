@@ -136,15 +136,28 @@ class Workflow4EstimateReview:
                 self.store.upsert(row["jira_ticket_id"], drift_flagged_at=now)
                 continue
 
-            direction = "over-estimated" if drift > 0 else "under-estimated"
+            # Escalation tier scaling by priority: P1 -> CEO, P2 -> CTO, P3/P4 -> SVP/VP Engineering
+            priority = str(row.get("priority") or "P3").upper()
+            if any(p in priority for p in ["P1", "HIGHEST", "CRITICAL", "BLOCKER"]):
+                escalation_role = "CEO"
+            elif any(p in priority for p in ["P2", "HIGH"]):
+                escalation_role = "CTO"
+            else:
+                escalation_role = "SVP / VP Engineering"
+
+            direction = "Under-estimated / SLA Overrun Risk" if drift > 0 else "Over-estimated / Buffer Inflation"
+            status_tag = "[RED]" if drift > 25.0 else ("[YELLOW]" if abs(drift) > 25.0 else "[GREEN]")
+            
             text = (
-                f"*Estimate review: {row['jira_ticket_id']}*\n"
+                f"To: *{escalation_role}* (Escalation Tier: `{priority}`)\n"
+                f"{status_tag} *TAT Drift & Scope Escalation: {row['jira_ticket_id']}*\n"
                 f"- Summary: {row.get('summary') or ''}\n"
-                f"- Developer: {row.get('assignee_name') or 'unassigned'}\n"
-                f"- Their estimate: {estimate:g} h\n"
-                f"- Calibrated estimate: {float(predicted):g} h\n"
-                f"- Drift: {drift:+.0f}% ({direction})\n\n"
-                f"Shared for visibility. The developer has not been notified."
+                f"- Assignee: *{row.get('assignee_name') or 'unassigned'}*\n"
+                f"- Developer Target TAT: `{estimate:g}h` (Baseline: 40h/week)\n"
+                f"- Benchmark (50% Senior Dev Efficiency): `{float(predicted):g}h`\n"
+                f"- SLA Variance / Drift: `{drift:+.0f}%` ({direction})\n"
+                f"- Escalation Action: Routed to *{escalation_role}* based on priority `{priority}`.\n\n"
+                f"_Shared for management visibility. The developer has not been directly confronted._"
             )
 
             group_channel = self._resolve_group_channel_id()
@@ -252,17 +265,22 @@ class Workflow4EstimateReview:
             mid = len(s) // 2
             return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
 
+        med_drift = median(drifts)
+        overall_status = "[RED]" if med_drift > 25.0 else ("[YELLOW]" if abs(med_drift) > 10.0 else "[GREEN]")
+
         lines = [
-            "*AI Governor Weekly Estimation Accuracy Scorecard*",
-            f"- Tickets completed: {len(rows)}",
-            f"- Median drift (actual vs estimate): {median(drifts):+.0f}%",
-            f"- Ran over estimate: {breached} of {len(rows)}",
+            f"{overall_status} *AI Governor Weekly TAT & SLA Adherence Scorecard*",
+            f"- Total Delivered Tickets: `{len(rows)}`",
+            f"- Median TAT Variance (Actual vs Target): `{med_drift:+.0f}%`",
+            f"- SLA Breached (>100% of Target TAT): `{breached}` of `{len(rows)}`",
             "",
-            "*Per developer performance (median drift):*",
+            "*Per Developer TAT Adherence (Median Variance):*",
         ]
         for dev, values in sorted(per_dev.items(), key=lambda kv: -abs(median(kv[1]))):
-            lines.append(f"- *{dev}*: {median(values):+.0f}% over {len(values)} ticket(s)")
-        lines.append("\n_Note: Positive drift means the work took longer than the original estimate._")
+            dev_med = median(values)
+            dev_status = "[RED]" if dev_med > 25.0 else ("[YELLOW]" if abs(dev_med) > 10.0 else "[GREEN]")
+            lines.append(f"- {dev_status} *{dev}*: `{dev_med:+.0f}%` across {len(values)} ticket(s)")
+        lines.append("\n_Note: Positive variance indicates delivery exceeded the target turnaround time (TAT)._")
 
         text = "\n".join(lines)
         group_channel = self._resolve_group_channel_id()
@@ -270,7 +288,7 @@ class Workflow4EstimateReview:
             group_channel
             and self._post([group_channel], text)
         )
-        return {"tickets": len(rows), "median_drift_pct": round(median(drifts), 1), "sent": sent, "channel": group_channel}
+        return {"tickets": len(rows), "median_drift_pct": round(med_drift, 1), "sent": sent, "channel": group_channel}
 
     # ── slack ────────────────────────────────────────────────────────────────
 

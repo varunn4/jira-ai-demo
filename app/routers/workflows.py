@@ -170,6 +170,32 @@ def workflow3_daily_checkin() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"daily-checkin failed: {exc}") from exc
 
 
+@router.post("/workflow3/dev-checkin")
+def workflow3_dev_checkin() -> dict[str, Any]:
+    """9:00 AM IST: Send individual developer status update."""
+    log.info("POST /workflow3/dev-checkin")
+    try:
+        from app.workflow3_effort_tracker import Workflow3EffortTracker
+
+        return Workflow3EffortTracker(settings=settings).daily_dev_checkin()
+    except Exception as exc:
+        log.exception("/workflow3/dev-checkin failed")
+        raise HTTPException(status_code=500, detail=f"dev-checkin failed: {exc}") from exc
+
+
+@router.post("/workflow3/tl-summary")
+def workflow3_tl_summary() -> dict[str, Any]:
+    """3:00 PM IST: Send combined status digest to Team Lead & Management."""
+    log.info("POST /workflow3/tl-summary")
+    try:
+        from app.workflow3_effort_tracker import Workflow3EffortTracker
+
+        return Workflow3EffortTracker(settings=settings).daily_tl_summary()
+    except Exception as exc:
+        log.exception("/workflow3/tl-summary failed")
+        raise HTTPException(status_code=500, detail=f"tl-summary failed: {exc}") from exc
+
+
 # ─── Workflow 4: Due Date & Compliance ───────────────────────────────────────
 
 @router.post("/workflow4", response_model=Workflow4DueDateResponse)
