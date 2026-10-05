@@ -79,7 +79,14 @@ def _resolve_project_key(settings: Settings) -> str:
     user_proj = getattr(settings, "jira_project_key", "") or getattr(settings, "jira_project_keys", "")
     if user_proj and user_proj.strip() and user_proj.strip().upper() != "RFT":
         return user_proj.strip().split(",")[0].strip()
-    return (settings.rft_estimate_project_key or "SCRUM").strip()
+    try:
+        from app.jira_fetcher import _fetch_all_projects
+        projs = _fetch_all_projects()
+        if projs and projs[0].get("key"):
+            return str(projs[0]["key"]).strip()
+    except Exception:
+        pass
+    return (settings.rft_estimate_project_key or "").strip()
 
 
 def _fetch_estimated_tickets(settings: Settings) -> list[dict[str, Any]]:

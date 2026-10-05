@@ -452,7 +452,7 @@ def get_jira_create_context(
 
     return {
         "connected_repositories": connected_repos,
-        "projects": projects or [{"key": "SCRUM", "name": "Scrum Project"}],
+        "projects": projects,
         "users": users,
         "jira_configured": jc.is_configured(),
     }
@@ -470,7 +470,15 @@ def create_jira_ticket(
     from app.workflow1_reviewer import Workflow1Reviewer
     from app.schemas import Workflow1ReviewRequest
 
-    project_key = str(payload.get("project_key") or "SCRUM").strip().upper()
+    project_key = str(payload.get("project_key") or "").strip().upper()
+    if not project_key:
+        try:
+            from app.jira_fetcher import _fetch_all_projects
+            projs = _fetch_all_projects()
+            if projs and projs[0].get("key"):
+                project_key = str(projs[0]["key"]).strip().upper()
+        except Exception:
+            pass
     summary = str(payload.get("summary") or "").strip()
     description = str(payload.get("description") or "").strip()
     issue_type = str(payload.get("issue_type") or "Task").strip()

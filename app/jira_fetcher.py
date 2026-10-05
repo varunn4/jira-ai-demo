@@ -35,22 +35,38 @@ class ProjectGoneError(Exception):
     """Raised when Jira returns 410 Gone for a project (archived / deleted)."""
 
 
-# ─── Jira REST helpers ───────────────────────────────────────────────────────
+def _get_jira_creds() -> tuple[str, str, str]:
+    from app.config import reload_settings, settings
+    reload_settings()
+    base_url = (settings.jira_base_url or "").strip().rstrip("/")
+    email = (settings.jira_email or "").strip()
+    api_token = (settings.jira_api_token or "").strip()
+    if not (base_url and email and api_token) and settings.database_url:
+        try:
+            from app.app_settings import get_all_settings
+            db_conf = get_all_settings(settings)
+            base_url = base_url or str(db_conf.get("jira_base_url") or "").strip().rstrip("/")
+            email = email or str(db_conf.get("jira_email") or "").strip()
+            api_token = api_token or str(db_conf.get("jira_api_token") or "").strip()
+        except Exception:
+            pass
+    if base_url and not (base_url.startswith("http://") or base_url.startswith("https://")):
+        base_url = f"https://{base_url}"
+    return base_url, email, api_token
+
 
 def _auth() -> HTTPBasicAuth:
-    from app.config import reload_settings
-    reload_settings()
-    return HTTPBasicAuth(settings.jira_email, settings.jira_api_token)
+    _, email, api_token = _get_jira_creds()
+    return HTTPBasicAuth(email, api_token)
 
 
 def _jira_get(path: str, params: Optional[dict] = None) -> dict[str, Any]:
-    from app.config import reload_settings
-    reload_settings()
-    base = (settings.jira_base_url or "").rstrip("/")
+    base_url, email, api_token = _get_jira_creds()
     clean_path = ("/" + path.lstrip("/")) if path else ""
-    url = f"{base}{clean_path}"
+    url = f"{base_url}{clean_path}"
+    auth = HTTPBasicAuth(email, api_token)
     for _ in range(5):
-        resp = requests.get(url, headers=_HEADERS, auth=_auth(), params=params, timeout=60)
+        resp = requests.get(url, headers=_HEADERS, auth=auth, params=params, timeout=60)
         if resp.status_code == 429:
             wait = int(resp.headers.get("Retry-After", "5"))
             log.warning("Jira rate-limited; sleeping %ds", wait)
@@ -382,6 +398,29 @@ def _ticket_columns(ticket: dict[str, Any]) -> dict[str, Any]:
 def _upsert_tickets(conn: psycopg.Connection, tickets: list[dict[str, Any]]) -> None:
     for ticket in tickets:
         col = _ticket_columns(ticket)
+        # Check previous cached status to detect changes
+        try:
+            prev = conn.execute(
+                "SELECT status, assignee_name FROM jira_ticket_cache WHERE UPPER(ticket_key) = UPPER(%s)",
+                (col["ticket_key"],),
+            ).fetchone()
+            old_status = prev[0] if prev else None
+            new_status = col.get("status") or ""
+            if old_status and new_status and old_status.strip().lower() != new_status.strip().lower():
+                from app.utilization import record_status_change
+                record_status_change(
+                    settings,
+                    issue_key=col["ticket_key"],
+                    to_status=new_status,
+                    from_status=old_status,
+                    project_key=col.get("project_key") or "",
+                    issue_type=col.get("issue_type") or "",
+                    assignee=col.get("assignee_name") or "",
+                    source="sync",
+                )
+        except Exception as tr_exc:
+            log.debug("Status transition detection error for %s: %s", col.get("ticket_key"), tr_exc)
+
         conn.execute(
             """
             INSERT INTO jira_ticket_cache (
@@ -472,7 +511,8 @@ def fetch_all_tickets(
     otherwise and stores the result back into the cache.
     Returns an empty list gracefully when credentials are absent.
     """
-    if not all([settings.jira_base_url, settings.jira_email, settings.jira_api_token]):
+    base_url, email, api_token = _get_jira_creds()
+    if not (base_url and email and api_token):
         log.warning("Jira credentials not configured; returning empty ticket list")
         return []
 

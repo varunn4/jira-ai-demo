@@ -164,6 +164,26 @@ def record_status_change(
         to_status,
         recorded,
     )
+
+    # Broadcast status change to Slack team/management channel
+    if recorded:
+        try:
+            from app.slack_client import SlackClient
+            slack = SlackClient(settings)
+            if slack.is_configured():
+                from app.workflow3_effort_tracker import Workflow3EffortTracker
+                chan = Workflow3EffortTracker(settings=settings)._resolve_group_channel_id()
+                if chan:
+                    assignee_str = f" | Assignee: *{assignee}*" if assignee else ""
+                    from_str = f" from `{from_status}`" if from_status else ""
+                    msg = (
+                        f"📌 *Jira Status Update: {issue_key}*\n"
+                        f"Ticket moved{from_str} to *`{to_status}`*{assignee_str}"
+                    )
+                    slack.post_message(chan, msg)
+        except Exception as notify_exc:
+            LOGGER.warning("Could not post status change to Slack for %s: %s", issue_key, notify_exc)
+
     return {"recorded": recorded, "ticket": issue_key, "to_status": to_status}
 
 

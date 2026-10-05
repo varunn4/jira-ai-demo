@@ -72,33 +72,71 @@ class Workflow3EffortTracker:
         except Exception as sync_exc:
             log.warning("workflow3 live cache sync skipped: %s", sync_exc)
 
-        cached_rows = self.store.cached_tickets_by_status(status_list)
+        # 1. Direct Live Jira API query as ultimate source of truth
+        in_dev: dict[str, dict[str, Any]] = {}
+        try:
+            from app.jira_client import JiraClient
+            jc = JiraClient(self.settings)
+            if jc.is_configured():
+                jql_statuses = ", ".join(f'"{s}"' for s in status_candidates)
+                jql = f'status in ({jql_statuses}) OR statusCategory = "In Progress"'
+                res = jc._request(
+                    "GET",
+                    "/rest/api/3/search/jql",
+                    params={"jql": jql, "maxResults": 100, "fields": "summary,status,assignee,timetracking,project"},
+                )
+                if not res or not res.get("issues"):
+                    res = jc._request(
+                        "GET",
+                        "/rest/api/3/search",
+                        params={"jql": jql, "maxResults": 100, "fields": "summary,status,assignee,timetracking,project"},
+                    )
+                issues = (res or {}).get("issues", [])
+                for issue in issues:
+                    k = str(issue.get("key") or "").upper()
+                    if not k:
+                        continue
+                    f = issue.get("fields", {}) or {}
+                    st_name = ((f.get("status") or {}).get("name")) or ""
+                    proj_k = ((f.get("project") or {}).get("key")) or (k.split("-")[0] if "-" in k else "")
+                    ass_name = ((f.get("assignee") or {}).get("displayName")) or "Unassigned"
+                    tt = (f.get("timetracking") or {})
+                    est_sec = tt.get("originalEstimateSeconds")
+                    est_h = round(float(est_sec) / 3600.0, 2) if est_sec else None
+                    in_dev[k] = {
+                        "ticket_key": k,
+                        "project_key": proj_k,
+                        "summary": f.get("summary") or "",
+                        "status": st_name,
+                        "assignee_name": ass_name,
+                        "estimate_hours": est_h,
+                    }
+                log.info("workflow3: fetched %d live in-dev ticket(s) directly from Jira Cloud JQL", len(in_dev))
+        except Exception as jc_exc:
+            log.warning("workflow3 live JQL fetch error: %s", jc_exc)
 
-        in_dev = {
-            str(r["ticket_key"]).upper(): r
-            for r in cached_rows
-        }
-
+        # 2. Fallback to cache if live JQL didn't populate
         if not in_dev:
-            log.info(
-                "workflow3: no tickets currently in dev statuses %r.",
-                status_list,
-            )
+            cached_rows = self.store.cached_tickets_by_status(status_list)
+            in_dev = {
+                str(r["ticket_key"]).upper(): r
+                for r in cached_rows
+            }
 
-        # Reset any tracked ticket that no longer exists in Jira cache or left dev status
+        # 3. Clean up non-existent / stale records dynamically from database
         try:
             with self.store._connect() as conn:
                 conn.execute(
                     """
-                    UPDATE effort_tracking
-                    SET tracking_started_at = NULL, is_complete = TRUE
+                    DELETE FROM effort_tracking
                     WHERE UPPER(jira_ticket_id) NOT IN (SELECT UPPER(ticket_key) FROM jira_ticket_cache)
                     """
                 )
                 conn.commit()
         except Exception as cln_exc:
-            log.warning("workflow3 cleanup stale effort_tracking skipped: %s", cln_exc)
+            log.warning("workflow3 cleanup stale records skipped: %s", cln_exc)
 
+        # Reset any tracked ticket that is no longer in active in_dev
         for row in self.store.in_dev_rows():
             if str(row["jira_ticket_id"]).upper() not in in_dev:
                 self.store.reset_clock(row["jira_ticket_id"])
@@ -109,7 +147,7 @@ class Workflow3EffortTracker:
             if existing and existing.get("tracking_started_at"):
                 continue
 
-            estimate = self._original_estimate_hours(key) or 8.0  # default to 8h if unestimated
+            estimate = ticket.get("estimate_hours") or self._original_estimate_hours(key) or 8.0
             fields: dict[str, Any] = {
                 "project_key": ticket.get("project_key"),
                 "summary": ticket.get("summary"),
