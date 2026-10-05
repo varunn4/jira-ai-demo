@@ -197,7 +197,7 @@ class Workflow3EffortTracker:
         remaining = max(0.0, estimate - elapsed)
         key = row["jira_ticket_id"]
         summary = row.get("summary") or ""
-        status_tag = "[RED]" if pct >= 100.0 else ("[YELLOW]" if pct >= 75.0 else "[GREEN]")
+        status_tag = "🔴" if pct >= 100.0 else ("🟡" if pct >= 75.0 else "🟢")
         
         headline = {
             "50_USED": f"{status_tag} *{key}* - 50% of Target TAT utilized",
@@ -227,10 +227,8 @@ class Workflow3EffortTracker:
 
         now = datetime.now(timezone.utc)
         hours_per_day = self.settings.effort_working_hours_per_day
+        self._reconcile()
         rows = self.store.in_dev_rows()
-        if not rows:
-            self._reconcile()
-            rows = self.store.in_dev_rows()
 
         if not rows:
             return {"messages_sent": 0, "tickets": 0, "detail": "No tickets currently in dev status"}
@@ -254,7 +252,7 @@ class Workflow3EffortTracker:
                 estimate = float(r.get("estimate_hours") or 8.0)
                 remaining = max(0.0, estimate - r["_elapsed"])
                 pct = percentage_used(r["_elapsed"], estimate)
-                status_tag = "[RED]" if pct >= 100.0 else ("[YELLOW]" if pct >= 75.0 else "[GREEN]")
+                status_tag = "🔴" if pct >= 100.0 else ("🟡" if pct >= 75.0 else "🟢")
                 dm_lines.append(
                     f"- {status_tag} *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
                     f"  Elapsed: `{r['_elapsed']:g}h` of `{estimate:g}h` Target TAT ({remaining:g}h remaining, {pct:.0f}% used)"
@@ -278,11 +276,8 @@ class Workflow3EffortTracker:
         now = datetime.now(timezone.utc)
         hours_per_day = self.settings.effort_working_hours_per_day
         group_channel = self._resolve_group_channel_id()
+        self._reconcile()
         rows = self.store.in_dev_rows()
-
-        if not rows:
-            self._reconcile()
-            rows = self.store.in_dev_rows()
 
         if not rows:
             return {"messages_sent": 0, "tickets": 0, "detail": "No tickets currently in dev status"}
@@ -298,7 +293,7 @@ class Workflow3EffortTracker:
             remaining = max(0.0, estimate - elapsed)
             pct = percentage_used(elapsed, estimate)
             assignee = r.get("assignee_name") or "Unassigned"
-            status_tag = "[RED]" if pct >= 100.0 else ("[YELLOW]" if pct >= 75.0 else "[GREEN]")
+            status_tag = "🔴" if pct >= 100.0 else ("🟡" if pct >= 75.0 else "🟢")
             lines.append(
                 f"- {status_tag} *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
                 f"  Assignee: *{assignee}* | Target TAT: `{estimate:g}h` | Elapsed: `{elapsed:g}h` ({pct:.0f}% of TAT) | Remaining TAT: `{remaining:g}h`"

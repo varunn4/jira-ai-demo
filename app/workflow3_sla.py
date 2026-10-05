@@ -55,7 +55,12 @@ class Workflow3SLAChecker:
             self._log_step("load_database_driver", "completed", output={"driver": "psycopg2"})
         except ImportError as exc:
             self._log_step("load_database_driver", "failed", output={"driver": "psycopg2"})
-            raise RuntimeError("The 'psycopg2-binary' package is required") from exc
+        # Force live Jira sync across all active projects before evaluating SLAs
+        try:
+            from app import jira_fetcher
+            jira_fetcher.fetch_all_tickets(force_refresh=True)
+        except Exception as sync_exc:
+            LOGGER.warning("workflow3 sla live sync skipped: %s", sync_exc)
 
         alerts: list[dict[str, str]] = []
         resolved_count = 0

@@ -33,6 +33,12 @@ class Workflow4EstimateReview:
         if not self.settings.database_url:
             return {"skipped": "DATABASE_URL not configured", "flagged": 0}
 
+        try:
+            from app.workflow3_effort_tracker import Workflow3EffortTracker
+            Workflow3EffortTracker(settings=self.settings)._reconcile()
+        except Exception as exc:
+            log.warning("workflow4 estimate review pre-reconcile skipped: %s", exc)
+
         pending = self._tickets_needing_review()
         if not pending:
             return {"reviewed": 0, "flagged": 0, "chased": 0}
@@ -146,7 +152,7 @@ class Workflow4EstimateReview:
                 escalation_role = "SVP / VP Engineering"
 
             direction = "Under-estimated / SLA Overrun Risk" if drift > 0 else "Over-estimated / Buffer Inflation"
-            status_tag = "[RED]" if drift > 25.0 else ("[YELLOW]" if abs(drift) > 25.0 else "[GREEN]")
+            status_tag = "🔴" if drift > 25.0 else ("🟡" if abs(drift) > 25.0 else "🟢")
             
             text = (
                 f"To: *{escalation_role}* (Escalation Tier: `{priority}`)\n"
