@@ -151,8 +151,8 @@ class Workflow4EstimateReview:
             else:
                 escalation_role = "SVP / VP Engineering"
 
-            direction = "Under-estimated / SLA Overrun Risk" if drift > 0 else "Over-estimated / Buffer Inflation"
-            status_tag = "🔴" if drift > 25.0 else ("🟡" if abs(drift) > 25.0 else "🟢")
+            direction = "Over-estimated / Buffer Inflation" if drift > 0 else "Under-estimated / SLA Overrun Risk"
+            status_tag = "🔴" if abs(drift) > 25.0 else ("🟡" if abs(drift) > 15.0 else "🟢")
             
             text = (
                 f"To: *{escalation_role}* (Escalation Tier: `{priority}`)\n"
@@ -162,8 +162,7 @@ class Workflow4EstimateReview:
                 f"- Developer Target TAT: `{estimate:g}h` (Baseline: 40h/week)\n"
                 f"- Benchmark (50% Senior Dev Efficiency): `{float(predicted):g}h`\n"
                 f"- SLA Variance / Drift: `{drift:+.0f}%` ({direction})\n"
-                f"- Escalation Action: Routed to *{escalation_role}* based on priority `{priority}`.\n\n"
-                f"_Shared for management visibility. The developer has not been directly confronted._"
+                f"- Escalation Action: Routed to *{escalation_role}* based on priority `{priority}`."
             )
 
             group_channel = self._resolve_group_channel_id()

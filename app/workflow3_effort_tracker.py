@@ -151,6 +151,7 @@ class Workflow3EffortTracker:
             if existing and existing.get("tracking_started_at"):
                 continue
 
+            dev_started_at = self._jira_dev_transition_time(key) or datetime.now(timezone.utc)
             estimate = ticket.get("estimate_hours") or self._original_estimate_hours(key) or 8.0
             fields: dict[str, Any] = {
                 "project_key": ticket.get("project_key"),
@@ -159,11 +160,41 @@ class Workflow3EffortTracker:
                 "assignee_slack_id": self.store.slack_id_for(ticket.get("assignee_name")),
                 "is_complete": False,
                 "estimate_hours": estimate,
-                "tracking_started_at": datetime.now(timezone.utc),
+                "tracking_started_at": dev_started_at,
             }
             self.store.upsert(key, **fields)
 
         return len(in_dev)
+
+    def _jira_dev_transition_time(self, issue_key: str) -> datetime | None:
+        """Fetch the exact timestamp when the ticket was moved to In-Dev in Jira."""
+        try:
+            from app.jira_client import JiraClient
+
+            jc = JiraClient(self.settings)
+            if jc.is_configured():
+                data = jc._request(
+                    "GET",
+                    f"/rest/api/3/issue/{issue_key}",
+                    params={"expand": "changelog", "fields": "updated,created"},
+                )
+                changelog = (data or {}).get("changelog", {})
+                histories = changelog.get("histories", [])
+                for h in reversed(histories):
+                    for item in h.get("items", []):
+                        if item.get("field") == "status":
+                            to_str = str(item.get("toString") or "").lower()
+                            if any(w in to_str for w in ["dev", "in progress", "development", "active"]):
+                                created_str = h.get("created")
+                                if created_str:
+                                    return datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                # Fallback to issue updated field
+                f = (data or {}).get("fields", {}) or {}
+                if f.get("updated"):
+                    return datetime.fromisoformat(str(f["updated"]).replace("Z", "+00:00"))
+        except Exception as exc:
+            log.debug("Could not fetch changelog transition time for %s: %s", issue_key, exc)
+        return None
 
     def _original_estimate_hours(self, issue_key: str) -> float | None:
         """Read the dev's Original Estimate from Jira Cloud or DB metadata."""

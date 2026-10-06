@@ -22,30 +22,54 @@ log = logging.getLogger(__name__)
 
 # ── time maths ────────────────────────────────────────────────────────────────
 
-def elapsed_working_hours(start: datetime, now: datetime, hours_per_day: float) -> float:
-    """Working hours between two instants: weekdays only, `hours_per_day` each.
+IST = timezone(timedelta(hours=5, minutes=30))
 
-    Partial days are prorated against the working day, so a ticket started at
-    midday counts half a day, not a whole one. Weekends contribute nothing. No
-    public-holiday calendar is modelled.
+
+def elapsed_working_hours(
+    start: datetime,
+    now: datetime,
+    hours_per_day: float = 8.0,
+    work_start_hour: int = 9,
+    work_start_minute: int = 30,
+) -> float:
+    """Calculate exact elapsed working hours within IST business hours (Monday-Friday, 40h/week).
+
+    Default working window is 9:30 AM to 5:30 PM IST (8.0 hours per day).
+    Weekends (Saturday & Sunday) and hours outside business hours (nights/evenings)
+    are completely excluded and do not count toward elapsed TAT.
     """
     if not start or now <= start:
         return 0.0
+
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
-    total = 0.0
-    cursor = start
-    while cursor < now:
-        day_end = (cursor + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        segment_end = min(day_end, now)
-        if cursor.weekday() < 5:  # Mon-Fri
-            fraction_of_day = (segment_end - cursor).total_seconds() / 86400.0
-            total += fraction_of_day * hours_per_day
-        cursor = segment_end
-    return round(total, 2)
+    start_ist = start.astimezone(IST)
+    now_ist = now.astimezone(IST)
+
+    total_seconds = 0.0
+    current_day = start_ist.date()
+    end_day = now_ist.date()
+
+    while current_day <= end_day:
+        if current_day.weekday() < 5:  # Monday (0) through Friday (4) only
+            day_work_start = datetime(
+                current_day.year, current_day.month, current_day.day,
+                work_start_hour, work_start_minute, 0, tzinfo=IST
+            )
+            day_work_end = day_work_start + timedelta(hours=hours_per_day)
+
+            effective_start = max(start_ist, day_work_start)
+            effective_end = min(now_ist, day_work_end)
+
+            if effective_end > effective_start:
+                total_seconds += (effective_end - effective_start).total_seconds()
+
+        current_day += timedelta(days=1)
+
+    return round(total_seconds / 3600.0, 2)
 
 
 def percentage_used(elapsed: float, estimate: float) -> float:

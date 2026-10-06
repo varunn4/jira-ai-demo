@@ -432,11 +432,9 @@ class Workflow3SLAChecker:
         if sla_window_hours <= 0:
             raise ValueError("sla_window_hours must be greater than zero")
 
+        from app.effort_tracking import elapsed_working_hours
         now_utc = datetime.now(timezone.utc)
-        if sla_start_time.tzinfo is None:
-            sla_start_time = sla_start_time.replace(tzinfo=timezone.utc)
-
-        elapsed_hours = (now_utc - sla_start_time).total_seconds() / 3600
+        elapsed_hours = elapsed_working_hours(sla_start_time, now_utc, hours_per_day=8.0)
         percentage_used = (elapsed_hours / sla_window_hours) * 100
         return elapsed_hours, percentage_used
 
