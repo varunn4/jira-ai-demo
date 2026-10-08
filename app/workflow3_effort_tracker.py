@@ -355,7 +355,7 @@ class Workflow3EffortTracker:
     # ── 3:00 PM: Combined TL & Management Summary ───────────────────────────
 
     def daily_tl_summary(self) -> dict[str, Any]:
-        """3:00 PM: Send combined developer status digest to Team Lead & Management."""
+        """3:00 PM: Send concise per-developer status digest to Team Lead & Management."""
         if not self.settings.effort_tracking_enabled:
             return {"skipped": "EFFORT_TRACKING_ENABLED is false", "messages_sent": 0}
 
@@ -368,23 +368,61 @@ class Workflow3EffortTracker:
         if not rows:
             return {"messages_sent": 0, "tickets": 0, "detail": "No tickets currently in dev status"}
 
-        lines = [
-            "To: Team Lead & Engineering Management",
-            "*AI Governor Team Dev Status & TAT Adherence (3:00 PM IST)*",
-            f"Active In-Dev Tickets across Developers ({len(rows)}):"
-        ]
+        from app.jira_client import JiraClient
+        import urllib.parse
+        jira_base_url = JiraClient(self.settings).base_url.rstrip("/")
+
+        dev_stats: dict[str, dict[str, Any]] = {}
         for r in rows:
+            dev_name = (r.get("assignee_name") or "Unassigned").strip()
             elapsed = elapsed_working_hours(r["tracking_started_at"], now, hours_per_day)
             estimate = float(r.get("estimate_hours") or 8.0)
-            remaining = max(0.0, estimate - elapsed)
             pct = percentage_used(elapsed, estimate)
-            assignee = r.get("assignee_name") or "Unassigned"
-            status_tag = "🔴" if pct >= 100.0 else ("🟡" if pct >= 75.0 else "🟢")
+
+            if dev_name not in dev_stats:
+                dev_stats[dev_name] = {
+                    "on_track": 0,
+                    "at_risk": 0,
+                    "breached": 0,
+                    "total": 0,
+                }
+            dev_stats[dev_name]["total"] += 1
+            if pct >= 100.0:
+                dev_stats[dev_name]["breached"] += 1
+            elif pct >= 75.0:
+                dev_stats[dev_name]["at_risk"] += 1
+            else:
+                dev_stats[dev_name]["on_track"] += 1
+
+        total_tickets = len(rows)
+        total_devs = len(dev_stats)
+        total_on_track = sum(s["on_track"] for s in dev_stats.values())
+        total_at_risk = sum(s["at_risk"] for s in dev_stats.values())
+        total_breached = sum(s["breached"] for s in dev_stats.values())
+
+        lines = [
+            "To: *Team Lead & Engineering Management*",
+            "*AI Governor — Team Leader Daily Summary (3:00 PM IST)*",
+            f"Active Dev Queue: *{total_tickets}* active ticket(s) across *{total_devs}* developer(s) (🟢 {total_on_track} on track, 🟡 {total_at_risk} at SLA risk, 🔴 {total_breached} breached)\n",
+            "*Per-Developer Breakdown:*",
+        ]
+
+        for dev_name, stats in sorted(dev_stats.items(), key=lambda x: x[0].lower()):
+            if jira_base_url and dev_name.lower() != "unassigned":
+                jql = f'assignee = "{dev_name}" AND statusCategory != Done'
+                encoded_jql = urllib.parse.quote(jql)
+                jira_url = f"{jira_base_url}/issues/?jql={encoded_jql}"
+                dev_label = f"<{jira_url}|{dev_name}>"
+            else:
+                dev_label = dev_name
+
             lines.append(
-                f"- {status_tag} *{r['jira_ticket_id']}*: {r.get('summary') or ''}\n"
-                f"  Assignee: *{assignee}* | Target TAT: `{estimate:g}h` | Elapsed: `{elapsed:g}h` ({pct:.0f}% of TAT) | Remaining TAT: `{remaining:g}h`"
+                f"• *{dev_label}*: 🟢 {stats['on_track']} on track, 🟡 {stats['at_risk']} at SLA risk, 🔴 {stats['breached']} breached"
             )
-        lines.append("\nPlease reply in thread if there are any team blockers or if management intervention is required.")
+
+        lines.append(
+            "\n_Click any developer's name to view their filtered active queue in Jira._"
+        )
 
         sent = 0
         if group_channel and self._post([group_channel], "\n".join(lines)):
@@ -393,7 +431,13 @@ class Workflow3EffortTracker:
                 self.store.upsert(r["jira_ticket_id"], last_checkin_at=now)
 
         log.info("workflow3 3PM TL summary: %d messages sent across %d tickets", sent, len(rows))
-        return {"messages_sent": sent, "tickets": len(rows), "group_channel": group_channel, "scope": "tl_3pm_summary"}
+        return {
+            "messages_sent": sent,
+            "tickets": len(rows),
+            "group_channel": group_channel,
+            "scope": "tl_3pm_summary",
+            "breakdown": dev_stats,
+        }
 
     def daily_checkin(self) -> dict[str, Any]:
         """Consolidated daily check-in (triggers both 9AM dev and 3PM TL formats)."""
